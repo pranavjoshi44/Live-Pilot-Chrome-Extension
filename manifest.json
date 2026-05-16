@@ -1,0 +1,75 @@
+{
+  "manifest_version": 3,
+  "name": "LivePilot- Free AI Browser Automation Agent",
+  "version": "1.5.0",
+  "description": "AI browser automation agent \u2014 automate tasks, record sessions, extract data with self-healing selectors",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png",
+    "32": "icons/icon32.png"
+  },
+  "action": {
+    "default_title": "Open LivePilot",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "exclude_matches": [
+        "https://mail.google.com/*",
+        "https://accounts.google.com/*",
+        "https://www.paypal.com/*",
+        "https://*.paypal.com/*",
+        "https://www.stripe.com/*",
+        "https://*.stripe.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*",
+        "sidebar.html",
+        "sidebar.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "homepage_url": "https://github.com/livepilot-ext/livepilot",
+  "minimum_chrome_version": "114",
+  "default_locale": "en"
+}

@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LivePilot</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f7f8fc;--surf:#fff;--surf2:#f0f2f8;--bdr:#e2e5ef;
+  --acc:#5b52e8;--acc2:#ff5577;--acc-lt:#eeedfb;
+  --txt:#1a1d2e;--txt2:#4a4d65;--mut:#9499b5;
+  --ok:#16a34a;--ok-lt:#dcfce7;
+  --warn:#d97706;--warn-lt:#fef3c7;
+  --err:#dc2626;--err-lt:#fee2e2;
+  --rec:#e11d48;--rec-lt:#fff1f2;
+  --f:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --m:'SF Mono','Cascadia Code','Consolas',monospace;
+  --r:10px;
+}
+body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:var(--f);display:flex;flex-direction:column;overflow:hidden}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes slide{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes recpulse{0%,100%{box-shadow:0 0 0 0 rgba(225,29,72,.4)}70%{box-shadow:0 0 0 5px rgba(225,29,72,0)}}
+
+/* ── ONBOARDING ────────────────────────────────────── */
+#onboarding{position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;padding:0;overflow-y:auto}
+#onboarding.hide{display:none}
+.ob-inner{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100%;padding:28px 24px;text-align:center}
+.ob-steps{display:flex;gap:6px;justify-content:center;margin-bottom:28px}
+.ob-step{width:32px;height:4px;border-radius:2px;background:var(--bdr);transition:background .3s}
+.ob-step.act{background:var(--acc)}
+.ob-icon{font-size:52px;margin-bottom:14px}
+.ob-title{font-size:22px;font-weight:800;color:var(--txt);margin-bottom:8px;letter-spacing:-.5px}
+.ob-desc{font-size:13px;color:var(--txt2);line-height:1.65;margin-bottom:22px;max-width:320px}
+.ob-link{font-size:12px;color:var(--acc);text-decoration:none;margin-bottom:16px;display:inline-block;font-weight:600}
+.ob-link:hover{text-decoration:underline}
+.ob-key-row{display:flex;gap:8px;margin-bottom:8px;width:100%;max-width:360px}
+.ob-key-inp{flex:1;background:var(--surf);border:1.5px solid var(--bdr);border-radius:9px;padding:10px 12px;color:var(--txt);font-family:var(--m);font-size:13px;outline:none;transition:border-color .2s}
+.ob-key-inp:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,82,232,.1)}
+.ob-key-inp::placeholder{color:var(--mut)}
+.ob-api-status{font-size:11px;min-height:16px;text-align:center;margin-bottom:14px}
+.ob-api-status.ok{color:var(--ok)}.ob-api-status.err{color:var(--err)}
+.ob-check-row{display:flex;align-items:flex-start;gap:10px;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);padding:11px 14px;width:100%;max-width:360px;margin-bottom:8px;text-align:left;transition:all .2s}
+.ob-check-ico{font-size:20px;flex-shrink:0;margin-top:1px}
+.ob-check-lbl strong{color:var(--txt);display:block;font-size:13px;margin-bottom:2px}
+.ob-check-lbl span{font-size:11px;color:var(--mut)}
+.btn-ob{width:100%;max-width:360px;padding:13px;background:linear-gradient(135deg,var(--acc),#7c75f0);color:#fff;border:none;border-radius:var(--r);font-family:var(--f);font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;box-shadow:0 2px 8px rgba(91,82,232,.3);margin-bottom:8px}
+.btn-ob:hover:not([disabled]){transform:translateY(-1px);box-shadow:0 4px 16px rgba(91,82,232,.4)}
+.btn-ob[disabled]{opacity:.45;cursor:not-allowed}
+.btn-ob-ghost{width:100%;max-width:360px;padding:10px;background:transparent;color:var(--mut);border:1px solid var(--bdr);border-radius:var(--r);font-family:var(--f);font-size:13px;cursor:pointer;transition:all .2s}
+.btn-ob-ghost:hover{border-color:var(--acc);color:var(--acc)}
+
+/* ── HEADER ─────────────────────────────────────────── */
+.hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px 9px;border-bottom:1px solid var(--bdr);background:var(--surf);flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.logo{display:flex;align-items:center;gap:8px}
+.logo-i{width:26px;height:26px;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px}
+.logo-t{font-size:14px;font-weight:800;letter-spacing:-.4px;color:var(--txt)}
+.logo-sub{font-size:9px;color:var(--mut);font-weight:500}
+.hdr-r{display:flex;align-items:center;gap:6px}
+.mdl-pill{font-size:9px;color:var(--acc);background:var(--acc-lt);border:1px solid rgba(91,82,232,.2);border-radius:20px;padding:2px 7px;font-weight:600;font-family:var(--m);cursor:pointer}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--mut);flex-shrink:0;transition:all .3s}
+.dot.run{background:var(--warn);box-shadow:0 0 5px var(--warn);animation:pulse 1s infinite}
+.dot.done{background:var(--ok);box-shadow:0 0 5px var(--ok)}
+.rec-badge{display:none;align-items:center;gap:4px;font-size:9px;color:var(--rec);font-weight:700;background:var(--rec-lt);border:1px solid rgba(225,29,72,.2);border-radius:20px;padding:2px 7px;animation:recpulse 1.5s infinite}
+.rec-badge.on{display:flex}
+.rec-dot{width:5px;height:5px;border-radius:50%;background:var(--rec);animation:pulse .8s infinite}
+
+/* ── LAYOUT ─────────────────────────────────────────── */
+.main{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-height:0}
+.pane{display:none;flex-direction:column}
+.pane.on{display:flex}
+
+/* ── API BANNER ─────────────────────────────────────── */
+.api-ban{margin:9px 12px 0;padding:8px 11px;background:var(--acc-lt);border:1px solid rgba(91,82,232,.25);border-radius:var(--r);font-size:11px;color:var(--acc);display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-weight:500}
+.api-ban.ok{color:var(--ok);border-color:rgba(22,163,74,.25);background:var(--ok-lt)}
+.api-box{display:none;margin:7px 12px 0;padding:10px;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.api-box.on{display:block}
+.api-box label{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px;display:block;font-weight:600}
+.api-row{display:flex;gap:5px}
+.api-inp{flex:1;background:var(--bg);border:1.5px solid var(--bdr);border-radius:7px;padding:7px 9px;color:var(--txt);font-family:var(--m);font-size:11px;outline:none}
+.api-inp:focus{border-color:var(--acc)}
+.btn-pri{padding:7px 12px;background:var(--acc);color:#fff;border:none;border-radius:7px;font-family:var(--f);font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn-pri:hover{background:#4a44d4}
+
+/* ── VARS ROW ───────────────────────────────────────── */
+.vars-row{display:none;gap:4px;padding:5px 12px 0;flex-wrap:wrap}
+.vars-row.on{display:flex}
+.var-chip{padding:2px 7px;background:var(--warn-lt);border:1px solid rgba(217,119,6,.25);border-radius:10px;font-size:10px;color:var(--warn);font-weight:600;cursor:pointer;font-family:var(--m)}
+.var-chip.unset{border-style:dashed;opacity:.7}
+
+/* ── TASK ───────────────────────────────────────────── */
+.task-w{padding:9px 12px 0}
+.task-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.lbl{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;font-weight:600}
+.task-hint{font-size:9px;color:var(--mut)}
+#taskInput{width:100%;background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r);padding:9px 11px;color:var(--txt);font-family:var(--f);font-size:12px;resize:none;outline:none;min-height:64px;line-height:1.55}
+#taskInput:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(91,82,232,.08)}
+#taskInput::placeholder{color:var(--mut)}
+
+/* ── CONTROLS + TOOLTIPS ────────────────────────────── */
+.ctrls{display:flex;gap:6px;padding:7px 12px 0;align-items:stretch}
+.btn-run{flex:1;padding:9px;background:linear-gradient(135deg,var(--acc),#7c75f0);color:#fff;border:none;border-radius:var(--r);font-family:var(--f);font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:0 2px 8px rgba(91,82,232,.3);transition:all .2s}
+.btn-run:hover:not([disabled]){transform:translateY(-1px);box-shadow:0 4px 16px rgba(91,82,232,.4)}
+.btn-run:active:not([disabled]){transform:translateY(0)}
+.btn-run[disabled]{opacity:.5;cursor:not-allowed;box-shadow:none}
+.kbd-hint{font-size:9px;opacity:.65;background:rgba(255,255,255,.25);border-radius:3px;padding:1px 4px;font-family:var(--m)}
+
+/* Tooltip wrapper */
+.tip{position:relative;flex-shrink:0}
+.tip .tip-label{position:absolute;bottom:calc(100% + 7px);left:50%;transform:translateX(-50%);background:#1a1d2e;color:#fff;font-size:10px;font-family:var(--f);padding:4px 8px;border-radius:6px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s;z-index:50;font-weight:500}
+.tip .tip-label::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:#1a1d2e}
+.tip:hover .tip-label{opacity:1}
+.btn-icon{width:34px;height:34px;background:var(--surf);color:var(--txt2);border:1.5px solid var(--bdr);border-radius:var(--r);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.btn-icon:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-lt)}
+.btn-icon.rec-on{border-color:var(--rec);color:var(--rec);background:var(--rec-lt);animation:recpulse 1.5s infinite}
+.btn-icon.clr:hover{border-color:var(--err);color:var(--err);background:var(--err-lt)}
+
+/* ── PLAN ───────────────────────────────────────────── */
+.plan-box{display:none;margin:8px 12px 0;background:var(--surf);border:1.5px solid rgba(91,82,232,.25);border-radius:var(--r);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.07)}
+.plan-box.on{display:block}
+.plan-hd{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid var(--bdr);background:linear-gradient(135deg,var(--acc-lt),#f5f4fd)}
+.plan-ttl{font-size:10px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.5px}
+.plan-acts{display:flex;gap:4px}
+.btn-ok{padding:3px 8px;background:var(--ok);color:#fff;border:none;border-radius:5px;font-family:var(--f);font-size:10px;font-weight:700;cursor:pointer}
+.btn-ok:hover{background:#15803d}
+.btn-ghost{padding:3px 8px;background:transparent;color:var(--mut);border:1px solid var(--bdr);border-radius:5px;font-family:var(--f);font-size:10px;cursor:pointer}
+.btn-ghost:hover{border-color:var(--err);color:var(--err)}
+.plan-steps{padding:6px 11px;max-height:130px;overflow-y:auto}
+.ps{display:flex;align-items:flex-start;gap:7px;padding:4px 0;font-size:11px;color:var(--txt2);border-bottom:1px solid var(--bdr)}
+.ps:last-child{border-bottom:none}
+.ps-n{min-width:16px;height:16px;background:var(--acc-lt);color:var(--acc);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;font-family:var(--m);flex-shrink:0;margin-top:1px}
+.ps-warn{font-size:9px;color:var(--warn);background:var(--warn-lt);border-radius:3px;padding:1px 4px;margin-left:auto;flex-shrink:0;font-weight:600}
+
+/* ── FEED ───────────────────────────────────────────── */
+.feed-box{display:none;margin:8px 12px 0;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.feed-box.on{display:block}
+.feed-hd{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--surf2);border-bottom:1px solid var(--bdr)}
+.feed-ttl{font-size:10px;font-weight:600;color:var(--txt2);display:flex;align-items:center;gap:5px}
+.feed-live{font-size:9px;color:var(--warn);font-weight:600;animation:pulse 1s infinite}
+.feed-timer{font-size:9px;color:var(--mut);font-family:var(--m)}
+.feed-acts{display:flex;gap:3px;align-items:center}
+.btn-stop{padding:2px 7px;background:var(--err-lt);color:var(--err);border:1px solid rgba(220,38,38,.25);border-radius:4px;font-size:9px;font-family:var(--f);font-weight:600;cursor:pointer}
+.btn-sm-copy{padding:2px 7px;background:var(--surf);color:var(--mut);border:1px solid var(--bdr);border-radius:4px;font-size:9px;font-family:var(--f);font-weight:600;cursor:pointer}
+.btn-sm-copy:hover{border-color:var(--acc);color:var(--acc)}
+.prog-bar{height:3px;background:var(--bdr)}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:width .4s ease;width:0%}
+.feed-log{max-height:160px;overflow-y:auto;padding:4px}
+.fi{display:flex;align-items:flex-start;gap:5px;padding:3px 6px;border-radius:5px;margin-bottom:1px;font-size:10px}
+.fi:hover{background:var(--surf2)}
+.fi.done{color:var(--ok)}.fi.run{color:var(--warn);background:var(--warn-lt)}.fi.err{color:var(--err);background:var(--err-lt)}.fi.inf{color:var(--mut)}.fi.heal{color:#7c3aed;background:#f5f3ff}
+.fi-ic{min-width:11px;margin-top:1px}.fi-tx{flex:1;line-height:1.4;font-family:var(--m);word-break:break-word}.fi-ts{font-size:8px;color:var(--mut);font-family:var(--m);white-space:nowrap}
+.ss-strip{display:flex;gap:4px;padding:6px 10px;overflow-x:auto;border-top:1px solid var(--bdr);background:var(--surf2)}
+.ss-th{min-width:52px;height:34px;background:var(--bdr);border:1.5px solid var(--bdr);border-radius:5px;overflow:hidden;cursor:pointer;position:relative;flex-shrink:0;transition:all .2s}
+.ss-th:hover{border-color:var(--acc);transform:scale(1.07)}
+.ss-th img{width:100%;height:100%;object-fit:cover;display:block}
+.ss-n{position:absolute;bottom:1px;right:2px;font-size:8px;color:#fff;font-family:var(--m);text-shadow:0 1px 3px rgba(0,0,0,.8);font-weight:600}
+
+/* ── RESULTS PANEL ──────────────────────────────────── */
+.result-box{display:none;margin:7px 12px 0;background:var(--surf);border:1px solid rgba(22,163,74,.3);border-radius:var(--r);overflow:hidden}
+.result-box.on{display:block}
+.result-hd{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--ok-lt);border-bottom:1px solid rgba(22,163,74,.2)}
+.result-title{font-size:10px;font-weight:700;color:var(--ok)}
+.result-acts{display:flex;gap:4px}
+.btn-export{padding:2px 8px;border:1px solid rgba(22,163,74,.35);color:var(--ok);background:rgba(22,163,74,.1);border-radius:4px;font-size:9px;font-family:var(--f);font-weight:600;cursor:pointer}
+.btn-export:hover{background:rgba(22,163,74,.2)}
+.result-tabs{display:flex;border-bottom:1px solid var(--bdr);background:var(--surf2)}
+.result-tab{flex:1;padding:5px 8px;font-size:10px;font-family:var(--f);font-weight:600;color:var(--mut);background:transparent;border:none;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s}
+.result-tab.on{color:var(--acc);border-bottom-color:var(--acc)}
+.result-body{padding:8px 10px;max-height:160px;overflow-y:auto}
+.result-summary{font-size:11px;color:var(--txt2);line-height:1.55}
+.result-table{width:100%;border-collapse:collapse;font-size:10px}
+.result-table th{background:var(--surf2);color:var(--mut);font-weight:600;padding:4px 7px;text-align:left;border-bottom:1px solid var(--bdr);font-family:var(--m)}
+.result-table td{padding:4px 7px;border-bottom:1px solid var(--bdr);color:var(--txt2);font-family:var(--m)}
+.result-table tr:last-child td{border-bottom:none}
+.result-table a{color:var(--acc);text-decoration:none;font-size:9px}
+.result-table a:hover{text-decoration:underline}
+.result-raw{font-family:var(--m);font-size:10px;color:var(--txt2);white-space:pre-wrap;word-break:break-word;line-height:1.5}
+
+/* ── WORKFLOWS ──────────────────────────────────────── */
+.wf-list{padding:8px 12px;flex:1}
+.wf-search{width:100%;background:var(--surf);border:1.5px solid var(--bdr);border-radius:8px;padding:6px 9px;color:var(--txt);font-family:var(--f);font-size:11px;outline:none;margin-bottom:7px}
+.wf-search:focus{border-color:var(--acc)}
+.wf-item{display:flex;align-items:center;padding:8px 10px;background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r);margin-bottom:5px;cursor:pointer;transition:all .2s}
+.wf-item:hover{border-color:var(--acc);transform:translateX(2px)}
+.wf-ico{width:28px;height:28px;background:var(--acc-lt);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0;margin-right:8px}
+.wf-info{flex:1;min-width:0}
+.wf-name{font-size:11px;font-weight:600;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--txt)}
+.wf-meta{font-size:9px;color:var(--mut);font-family:var(--m)}
+.wf-btns{display:flex;gap:3px;flex-shrink:0;margin-left:6px}
+.wf-btn{width:23px;height:23px;background:var(--surf2);border:1px solid var(--bdr);border-radius:5px;color:var(--mut);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .2s}
+.wf-btn:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-lt)}
+.wf-btn.del:hover{border-color:var(--err);color:var(--err);background:var(--err-lt)}
+
+/* ── RECORDINGS ─────────────────────────────────────── */
+.rec-pane{padding:8px 12px;flex:1;overflow-y:auto}
+.rec-pane-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sec-title{font-size:11px;font-weight:700;color:var(--txt)}
+.btn-clr{font-size:10px;color:var(--mut);background:none;border:none;cursor:pointer;font-family:var(--f);padding:2px 5px;border-radius:4px}
+.btn-clr:hover{color:var(--err);background:var(--err-lt)}
+.rec-item{background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r);margin-bottom:7px;overflow:hidden}
+.rec-item:hover{border-color:var(--acc)}
+.rec-item-hd{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer}
+.rec-item-ico{width:28px;height:28px;background:var(--rec-lt);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.rec-item-info{flex:1;min-width:0}
+.rec-item-name{font-size:11px;font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-item-meta{font-size:9px;color:var(--mut);font-family:var(--m);margin-top:1px}
+.rec-item-acts{display:flex;gap:3px;flex-shrink:0}
+.rec-tl{display:none;border-top:1px solid var(--bdr);max-height:150px;overflow-y:auto;background:var(--surf2)}
+.rec-tl.open{display:block}
+.rtl-step{display:flex;align-items:center;gap:6px;padding:4px 10px;border-bottom:1px solid var(--bdr);font-size:10px;color:var(--txt2)}
+.rtl-step:last-child{border-bottom:none}
+.rtl-n{width:16px;height:16px;background:var(--acc-lt);color:var(--acc);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0;font-family:var(--m)}
+.rtl-act{width:46px;font-size:9px;color:var(--mut);font-family:var(--m);flex-shrink:0;text-transform:uppercase}
+.rtl-tgt{flex:1;font-size:9px;color:var(--txt2);font-family:var(--m);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rtl-ss{width:32px;height:22px;border-radius:3px;overflow:hidden;flex-shrink:0;border:1px solid var(--bdr);cursor:pointer;background:var(--bdr)}
+.rtl-ss img{width:100%;height:100%;object-fit:cover;display:block}
+.play-ctrl{border-top:1px solid var(--bdr);padding:7px 10px;background:var(--surf)}
+.iter-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:10px;color:var(--txt2)}
+.iter-inp{width:44px;background:var(--surf2);border:1.5px solid var(--bdr);border-radius:5px;padding:3px 6px;color:var(--txt);font-family:var(--m);font-size:10px;outline:none;text-align:center}
+.iter-inp:focus{border-color:var(--acc)}
+.play-row{display:flex;align-items:center;gap:6px}
+.play-slider{flex:1;accent-color:var(--acc);cursor:pointer;height:3px}
+.play-time{font-size:9px;color:var(--mut);font-family:var(--m);white-space:nowrap}
+.btn-play{padding:4px 10px;background:var(--acc);color:#fff;border:none;border-radius:5px;font-size:10px;font-family:var(--f);font-weight:700;cursor:pointer}
+.btn-play:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── HISTORY ─────────────────────────────────────────── */
+.hist-pane{padding:8px 12px;flex:1;overflow-y:auto}
+.hist-pane-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.hist-entry{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;background:var(--surf);border:1.5px solid var(--bdr);border-radius:var(--r);margin-bottom:5px;cursor:pointer;transition:all .2s}
+.hist-entry:hover{border-color:var(--acc);transform:translateX(2px)}
+.hist-ico{width:24px;height:24px;background:var(--surf2);border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+.hist-body{flex:1;min-width:0}
+.hist-text{font-size:11px;color:var(--txt);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hist-time{font-size:9px;color:var(--mut);font-family:var(--m);margin-top:2px}
+.hist-del{width:18px;height:18px;background:none;border:none;color:var(--mut);cursor:pointer;font-size:10px;border-radius:3px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.hist-del:hover{background:var(--err-lt);color:var(--err)}
+
+/* ── SETTINGS ─────────────────────────────────────────── */
+.set-w{padding:8px 12px;overflow-y:auto;flex:1}
+.set-section{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;font-weight:600;margin:8px 0 5px}
+.s-row{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:5px}
+.s-lbl{font-size:11px;font-weight:600;color:var(--txt)}
+.s-dsc{font-size:9px;color:var(--mut);margin-top:1px}
+.tog{width:34px;height:19px;background:var(--bdr);border-radius:10px;position:relative;cursor:pointer;transition:background .2s;flex-shrink:0}
+.tog.on{background:var(--acc)}
+.tog::after{content:'';position:absolute;width:13px;height:13px;background:#fff;border-radius:50%;top:3px;left:3px;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tog.on::after{transform:translateX(15px)}
+.mdl-sel{background:var(--bg);border:1.5px solid var(--bdr);border-radius:5px;color:var(--txt);font-family:var(--f);font-size:10px;padding:4px 7px;outline:none;cursor:pointer}
+.mdl-sel:focus{border-color:var(--acc)}
+.btn-dng{padding:4px 9px;background:var(--err-lt);border:1px solid rgba(220,38,38,.25);color:var(--err);border-radius:5px;font-size:10px;cursor:pointer;font-family:var(--f);font-weight:600}
+.vars-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:4px}
+.var-field{display:flex;flex-direction:column;gap:2px}
+.var-label{font-size:9px;color:var(--acc);font-family:var(--m);font-weight:600}
+.var-inp{background:var(--bg);border:1.5px solid var(--bdr);border-radius:5px;padding:4px 7px;color:var(--txt);font-family:var(--m);font-size:10px;outline:none}
+.var-inp:focus{border-color:var(--acc)}
+
+/* ── NAV ────────────────────────────────────────────── */
+.nav{display:flex;border-top:1px solid var(--bdr);background:var(--surf);flex-shrink:0}
+.nav-btn{flex:1;padding:7px 4px;background:transparent;border:none;color:var(--mut);font-family:var(--f);font-size:8px;font-weight:600;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;text-transform:uppercase;letter-spacing:.4px;position:relative}
+.nav-btn:hover,.nav-btn.on{color:var(--acc)}
+.nav-btn.on::after{content:'';position:absolute;bottom:0;left:20%;width:60%;height:2px;background:var(--acc);border-radius:2px 2px 0 0}
+.nav-i{font-size:14px}
+
+/* ── MODALS ─────────────────────────────────────────── */
+.m-ov{display:none;position:fixed;inset:0;background:rgba(15,15,35,.48);z-index:100;align-items:center;justify-content:center}
+.m-ov.on{display:flex}
+.m-box{background:var(--surf);border:1px solid var(--bdr);border-radius:13px;padding:16px;max-width:320px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.m-ttl{font-size:13px;font-weight:700;margin-bottom:9px;color:var(--txt)}
+.m-img{width:100%;border-radius:7px;margin-bottom:9px;display:block;border:1px solid var(--bdr)}
+.m-cls{width:100%;padding:8px;background:var(--surf2);border:1px solid var(--bdr);border-radius:7px;color:var(--txt2);font-family:var(--f);font-size:11px;cursor:pointer;font-weight:600}
+.c-ov{display:none;position:fixed;inset:0;background:rgba(15,15,35,.52);z-index:200;align-items:center;justify-content:center}
+.c-ov.on{display:flex}
+.c-box{background:var(--surf);border:1.5px solid var(--warn);border-radius:13px;padding:18px;max-width:275px;width:93%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.c-ico{font-size:24px;margin-bottom:7px}.c-ttl{font-size:13px;font-weight:700;margin-bottom:5px;color:var(--warn)}.c-dsc{font-size:11px;color:var(--txt2);line-height:1.5;margin-bottom:14px}
+.c-acts{display:flex;gap:7px}
+.c-yes{flex:1;padding:8px;background:var(--warn);color:#fff;border:none;border-radius:7px;font-family:var(--f);font-weight:700;font-size:11px;cursor:pointer}
+.c-no{flex:1;padding:8px;background:var(--surf2);color:var(--txt2);border:1px solid var(--bdr);border-radius:7px;font-family:var(--f);font-size:11px;cursor:pointer}
+.v-ov{display:none;position:fixed;inset:0;background:rgba(15,15,35,.48);z-index:300;align-items:center;justify-content:center}
+.v-ov.on{display:flex}
+.v-box{background:var(--surf);border:1px solid var(--bdr);border-radius:13px;padding:16px;max-width:310px;width:95%;box-shadow:0 8px 32px rgba(0,0,0,.15)}
+.v-ttl{font-size:12px;font-weight:700;margin-bottom:3px;color:var(--txt)}
+.v-dsc{font-size:10px;color:var(--mut);margin-bottom:10px}
+.v-field label{font-size:9px;color:var(--acc);font-family:var(--m);font-weight:600;margin-bottom:3px;display:block}
+.v-inp{width:100%;background:var(--bg);border:1.5px solid var(--bdr);border-radius:7px;padding:7px 9px;color:var(--txt);font-family:var(--m);font-size:11px;outline:none;margin-bottom:8px}
+.v-inp:focus{border-color:var(--acc)}
+.v-acts{display:flex;gap:7px}
+
+/* Save modal */
+.save-modal .m-box{max-width:290px}
+
+/* Delete confirm */
+.del-box{border-color:var(--err)!important}
+.del-box .c-ttl{color:var(--err)}
+.del-box .c-yes{background:var(--err)}
+
+.empty{text-align:center;padding:24px 12px;color:var(--mut)}
+.empty-i{font-size:28px;margin-bottom:8px;opacity:.4}
+.empty-t{font-size:11px;line-height:1.7}
+::-webkit-scrollbar{width:3px;height:3px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
+</style>
+</head>
+<body>
+
+<!-- ONBOARDING -->
+<div id="onboarding">
+  <div class="ob-inner">
+    <div class="ob-steps"><div class="ob-step act" id="obs1"></div><div class="ob-step" id="obs2"></div><div class="ob-step" id="obs3"></div></div>
+    <!-- Step 1 -->
+    <div id="ob-s1" style="display:flex;flex-direction:column;align-items:center;width:100%">
+      <div class="ob-icon">🤖</div>
+      <div class="ob-title">Welcome to LivePilot</div>
+      <div class="ob-desc">Your AI browser agent — type a goal, watch it execute step by step with live replay, self-healing selectors, and session recording.</div>
+      <button class="btn-ob" id="btnObS1Next">Get Started →</button>
+    </div>
+    <!-- Step 2 -->
+    <div id="ob-s2" style="display:none;flex-direction:column;align-items:center;width:100%">
+      <div class="ob-icon">⚡</div>
+      <div class="ob-title">Connect Groq AI</div>
+      <div class="ob-desc">Groq's free API gives you lightning-fast AI. Get your key in 30 seconds — no credit card needed.</div>
+      <a class="ob-link" id="btnObGroqLink" href="#">→ Get free key at console.groq.com</a>
+      <div class="ob-key-row"><input type="password" class="ob-key-inp" id="obApiInp" placeholder="Paste your gsk_... key here" autocomplete="off"></div>
+      <div class="ob-api-status" id="obApiStatus"></div>
+      <button class="btn-ob" id="btnObVerify">Verify &amp; Continue →</button>
+      <button class="btn-ob-ghost" id="btnObSkipApi">Skip for now</button>
+    </div>
+    <!-- Step 3 -->
+    <div id="ob-s3" style="display:none;flex-direction:column;align-items:center;width:100%">
+      <div class="ob-icon">🎉</div>
+      <div class="ob-title">You're all set!</div>
+      <div class="ob-check-row"><div class="ob-check-ico">🤖</div><div class="ob-check-lbl"><strong>AI Task Execution</strong><span>Type a goal, AI plans &amp; runs it</span></div></div>
+      <div class="ob-check-row"><div class="ob-check-ico">🔧</div><div class="ob-check-lbl"><strong>Self-Healing Selectors</strong><span>Auto-fixes broken selectors via live DOM</span></div></div>
+      <div class="ob-check-row"><div class="ob-check-ico">🎬</div><div class="ob-check-lbl"><strong>Session Recorder</strong><span>Record any session, replay with iterations</span></div></div>
+      <div class="ob-check-row"><div class="ob-check-ico">📊</div><div class="ob-check-lbl"><strong>Data Extraction</strong><span>Export results as CSV or plain text</span></div></div>
+      <button class="btn-ob" id="btnObFinish">Open LivePilot →</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="logo"><div class="logo-i">🤖</div><div><div class="logo-t">LivePilot</div><div class="logo-sub">AI Browser Agent</div></div></div>
+  <div class="hdr-r">
+    <div class="rec-badge" id="recBadge"><div class="rec-dot"></div>REC</div>
+    <div class="mdl-pill" id="mdlPill">llama-3.3-70b</div>
+    <div class="dot" id="dot"></div>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- AGENT PANE -->
+<div class="pane on" id="pane-agent">
+  <div class="api-ban" id="apiBan"><span>⚡</span><span id="banTxt">Configure Groq API Key to start</span></div>
+  <div class="api-box" id="apiBox">
+    <label for="apiInp">Groq API Key</label>
+    <div class="api-row">
+      <input type="password" class="api-inp" id="apiInp" placeholder="gsk_..." autocomplete="off">
+      <button class="btn-pri" id="btnSaveKey">Save</button>
+    </div>
+  </div>
+  <div class="vars-row" id="varsRow"></div>
+  <div class="task-w">
+    <div class="task-top"><div class="lbl">Task</div><div class="task-hint">{{variable}} for smart fill</div></div>
+    <textarea id="taskInput" placeholder="Describe what you want to do...&#10;e.g. Go to amazon.com and search for MacBook Air, extract the top 5 prices"></textarea>
+  </div>
+  <div class="ctrls">
+    <button class="btn-run" id="btnRun">
+      <span id="runIco">&#9654;</span>
+      <span id="runLbl">Run Task</span>
+      <span class="kbd-hint">&#8984;&#8629;</span>
+    </button>
+    <div class="tip">
+      <button class="btn-icon" id="btnRecord">&#9210;</button>
+      <span class="tip-label">Record browser session</span>
+    </div>
+    <div class="tip">
+      <button class="btn-icon" id="btnSaveWf">&#128190;</button>
+      <span class="tip-label">Save as workflow</span>
+    </div>
+    <div class="tip">
+      <button class="btn-icon clr" id="btnClearTask">&#10005;</button>
+      <span class="tip-label">Clear task &amp; log</span>
+    </div>
+  </div>
+
+  <div class="plan-box" id="planBox">
+    <div class="plan-hd">
+      <div class="plan-ttl">&#9889; Execution Plan</div>
+      <div class="plan-acts">
+        <button class="btn-ok" id="btnApprove">Approve &#10003;</button>
+        <button class="btn-ghost" id="btnCancelPlan">Cancel</button>
+      </div>
+    </div>
+    <div class="plan-steps" id="planSteps"></div>
+  </div>
+
+  <div class="feed-box" id="feedBox">
+    <div class="feed-hd">
+      <div class="feed-ttl">Log <span class="feed-live" id="feedLive" hidden>&#11044; LIVE</span><span class="feed-timer" id="feedTimer"></span></div>
+      <div class="feed-acts">
+        <button class="btn-sm-copy" id="btnCopyLog" hidden>Copy</button>
+        <button class="btn-stop" id="btnStop" hidden>&#9724; Stop</button>
+      </div>
+    </div>
+    <div class="prog-bar" id="progWrap" hidden><div class="prog-fill" id="progFill"></div></div>
+    <div class="feed-log" id="feedLog"></div>
+    <div class="ss-strip" id="ssStrip" hidden></div>
+  </div>
+
+  <div class="result-box" id="resultBox">
+    <div class="result-hd">
+      <div class="result-title">&#9989; Results <span id="resultCount" style="font-size:9px;color:var(--mut);font-weight:400"></span></div>
+      <div class="result-acts">
+        <button class="btn-export" id="btnExportCSV">CSV</button>
+        <button class="btn-export" id="btnExportTxt">Text</button>
+        <button class="btn-export" id="btnCopyResult">Copy</button>
+      </div>
+    </div>
+    <div class="result-tabs">
+      <button class="result-tab on" id="tabSummary" data-rt="summary">Summary</button>
+      <button class="result-tab" id="tabTable" data-rt="table">Table</button>
+      <button class="result-tab" id="tabRaw" data-rt="raw">Raw</button>
+    </div>
+    <div class="result-body">
+      <div id="rtSummary" class="result-summary"></div>
+      <div id="rtTable"   style="display:none"><table class="result-table" id="rtTableEl"><thead><tr><th>#</th><th>Text</th><th>URL</th></tr></thead><tbody id="rtTbody"></tbody></table></div>
+      <div id="rtRaw"    style="display:none"><pre class="result-raw" id="rtRawEl"></pre></div>
+    </div>
+  </div>
+</div>
+
+<!-- WORKFLOWS PANE -->
+<div class="pane" id="pane-workflows">
+  <div class="wf-list" id="wfList">
+    <input type="text" class="wf-search" id="wfSearch" placeholder="Search workflows&#8230;">
+    <div id="wfItems"></div>
+  </div>
+</div>
+
+<!-- RECORDINGS PANE -->
+<div class="pane" id="pane-recordings">
+  <div class="rec-pane">
+    <div class="rec-pane-hd"><span class="sec-title">Session Recordings</span><button class="btn-clr" id="btnRecClear">Clear all</button></div>
+    <div id="recList"></div>
+  </div>
+</div>
+
+<!-- HISTORY PANE -->
+<div class="pane" id="pane-history">
+  <div class="hist-pane">
+    <div class="hist-pane-hd"><span class="sec-title">Recent Tasks</span><button class="btn-clr" id="btnHistClear">Clear all</button></div>
+    <div id="histList"></div>
+  </div>
+</div>
+
+<!-- SETTINGS PANE -->
+<div class="pane" id="pane-settings">
+  <div class="set-w">
+    <div class="set-section">Automation</div>
+    <div class="s-row"><div><div class="s-lbl">Human-in-the-Loop</div><div class="s-dsc">Pause before sensitive actions</div></div><div class="tog on" id="togHITL" data-key="hitl"></div></div>
+    <div class="s-row"><div><div class="s-lbl">Auto Screenshots</div><div class="s-dsc">Capture after every step</div></div><div class="tog on" id="togShots" data-key="screenshots"></div></div>
+    <div class="s-row"><div><div class="s-lbl">Show Plan First</div><div class="s-dsc">Review AI plan before execution</div></div><div class="tog on" id="togPlan" data-key="planning"></div></div>
+    <div class="set-section">AI Model</div>
+    <div class="s-row"><div><div class="s-lbl">Groq Model</div><div class="s-dsc">Model for planning &amp; healing</div></div>
+      <select class="mdl-sel" id="mdlSel"><option value="llama-3.3-70b-versatile">Llama 3.3 70B</option><option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option></select></div>
+    <div class="set-section">Smart Variables</div>
+    <div class="vars-grid">
+      <div class="var-field"><div class="var-label">{{email}}</div><input class="var-inp" data-var="email" placeholder="your@email.com"></div>
+      <div class="var-field"><div class="var-label">{{name}}</div><input class="var-inp" data-var="name" placeholder="Your Name"></div>
+      <div class="var-field"><div class="var-label">{{company}}</div><input class="var-inp" data-var="company" placeholder="Company"></div>
+      <div class="var-field"><div class="var-label">{{phone}}</div><input class="var-inp" data-var="phone" placeholder="+1 555..."></div>
+    </div>
+    <div class="set-section" style="margin-top:10px">Data</div>
+    <div class="s-row"><div><div class="s-lbl">Clear All Data</div><div class="s-dsc">Remove all data</div></div><button class="btn-dng" id="btnClear">Clear</button></div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<div class="nav">
+  <button class="nav-btn on" id="navAgent"      data-pane="agent">      <span class="nav-i">🤖</span>Agent</button>
+  <button class="nav-btn"    id="navWorkflows"  data-pane="workflows">  <span class="nav-i">📋</span>Flows</button>
+  <button class="nav-btn"    id="navRecordings" data-pane="recordings"> <span class="nav-i">🎬</span>Rec</button>
+  <button class="nav-btn"    id="navHistory"    data-pane="history">    <span class="nav-i">🕑</span>History</button>
+  <button class="nav-btn"    id="navSettings"   data-pane="settings">   <span class="nav-i">⚙️</span>Settings</button>
+</div>
+
+<!-- SCREENSHOT MODAL -->
+<div class="m-ov" id="ssModal"><div class="m-box"><div class="m-ttl" id="ssMtitle">Screenshot</div><img class="m-img" id="ssMimg" src="" alt=""><button class="m-cls" id="btnCloseSS">Close</button></div></div>
+<!-- CONFIRM MODAL -->
+<div class="c-ov" id="confModal"><div class="c-box"><div class="c-ico">⚠️</div><div class="c-ttl">Sensitive Action</div><div class="c-dsc" id="confDesc">Proceed?</div><div class="c-acts"><button class="c-yes" id="btnConfYes">Proceed</button><button class="c-no" id="btnConfNo">Skip</button></div></div></div>
+<!-- VAR MODAL -->
+<div class="v-ov" id="varModal"><div class="v-box"><div class="v-ttl">Fill Variable</div><div class="v-dsc">Enter a value for this placeholder.</div><div class="v-field"><label id="varModalLabel">{{var}}</label><input type="text" class="v-inp" id="varModalInp" placeholder="Enter value…"></div><div class="v-acts"><button class="btn-ok" id="btnVarOk" style="flex:1;padding:7px">Use</button><button class="c-no" id="btnVarSkip" style="flex:1">Skip</button></div></div></div>
+<!-- SAVE MODAL -->
+<div class="m-ov save-modal" id="saveModal"><div class="m-box"><div class="m-ttl" id="saveModalTitle">Save Workflow</div><label style="font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;font-weight:600;margin-bottom:5px;display:block">Name</label><input type="text" class="api-inp" id="saveModalInp" placeholder="e.g. Daily price check" style="width:100%;margin-bottom:10px"><div style="display:flex;gap:7px"><button class="btn-ok" id="btnSaveModalOk" style="flex:1;padding:8px">Save</button><button class="m-cls" id="btnSaveModalCancel" style="flex:1;padding:8px">Cancel</button></div></div></div>
+<!-- DELETE CONFIRM -->
+<div class="c-ov" id="delModal"><div class="c-box del-box"><div class="c-ico">🗑️</div><div class="c-ttl" id="delModalTitle">Delete?</div><div class="c-dsc" id="delModalDesc">Cannot be undone.</div><div class="c-acts"><button class="c-yes" id="btnDelYes" style="background:var(--err)">Delete</button><button class="c-no" id="btnDelNo">Cancel</button></div></div></div>
+
+<input type="hidden" id="wfName" value="">
+<script src="sidepanel.js"></script>
+</body>
+</html>

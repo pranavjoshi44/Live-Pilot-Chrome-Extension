@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "LivePilot",
+    "description": "Extension name"
+  },
+  "appDescription": {
+    "message": "AI browser automation agent \u2014 automate tasks, record sessions, extract data with self-healing selectors",
+    "description": "Extension description"
+  }
+}

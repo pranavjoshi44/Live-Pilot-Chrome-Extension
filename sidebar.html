@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>LivePilot</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#f7f8fc;--surf:#fff;--surf2:#f0f2f8;--bdr:#e2e5ef;--acc:#5b52e8;--acc2:#ff5577;--acc-lt:#eeedfb;--txt:#1a1d2e;--txt2:#4a4d65;--mut:#9499b5;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--f:-apple-system,BlinkMacSystemFont,Segoe UI,system-ui,sans-serif;--m:SF Mono,Cascadia Code,Consolas,monospace}
+html,body{width:320px;height:100vh;background:var(--bg);color:var(--txt);font-family:var(--f);display:flex;flex-direction:column;overflow:hidden}
+.hd{display:flex;align-items:center;justify-content:space-between;padding:11px 13px;border-bottom:1px solid var(--bdr);background:var(--surf);flex-shrink:0;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.logo{display:flex;align-items:center;gap:7px}
+.logo-i{width:22px;height:22px;background:linear-gradient(135deg,var(--acc),var(--acc2));border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px}
+.logo-t{font-size:13px;font-weight:800;color:var(--txt)}
+.btn-x{width:24px;height:24px;background:var(--surf2);border:1px solid var(--bdr);border-radius:5px;color:var(--mut);cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;transition:all .2s}
+.btn-x:hover{color:var(--txt);border-color:var(--acc);background:var(--acc-lt)}
+.stat{padding:9px 13px;background:var(--surf);border-bottom:1px solid var(--bdr);flex-shrink:0}
+.cur{font-size:11px;color:var(--mut);font-family:var(--m);min-height:16px}
+.cur.live{color:var(--warn);font-weight:600}
+.pb{margin-top:6px;height:3px;background:var(--bdr);border-radius:2px}
+.pf{height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:2px;transition:width .4s;width:0}
+.pm{display:flex;justify-content:space-between;margin-top:3px;font-size:9px;color:var(--mut);font-family:var(--m)}
+.body{flex:1;overflow-y:auto;display:flex;flex-direction:column;min-height:0}
+.sec-lbl{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;padding:9px 13px 5px;border-bottom:1px solid var(--bdr);font-weight:600}
+.tl{flex:1;padding:5px;overflow-y:auto}
+.ti{display:flex;gap:8px;padding:7px;border-radius:7px;margin-bottom:2px;transition:background .15s}
+.ti:hover{background:var(--surf2)}
+.ti-ic{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;margin-top:1px;font-weight:700}
+.ti-ic.done{background:#dcfce7;color:var(--ok)}
+.ti-ic.run{background:#fef3c7;color:var(--warn)}
+.ti-ic.err{background:#fee2e2;color:var(--err)}
+.ti-ic.inf{background:var(--surf2);color:var(--mut)}
+.ti-c{flex:1;min-width:0}
+.ti-tx{font-size:11px;line-height:1.4;font-family:var(--m);word-break:break-word;color:var(--txt2)}
+.ti-tx.dim{color:var(--mut)}
+.ti-ts{font-size:9px;color:var(--mut);font-family:var(--m);margin-top:2px}
+.ti-th{width:38px;height:26px;border-radius:4px;overflow:hidden;border:1.5px solid var(--bdr);cursor:pointer;flex-shrink:0;transition:all .2s}
+.ti-th:hover{border-color:var(--acc);box-shadow:0 2px 6px rgba(91,82,232,.2)}
+.ti-th img{width:100%;height:100%;object-fit:cover;display:block}
+.ss-sec{border-top:1px solid var(--bdr);padding:9px;flex-shrink:0;background:var(--surf2)}
+.ss-lbl{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px;font-weight:600}
+.ss-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.ss-t{aspect-ratio:16/10;background:var(--bdr);border:1.5px solid var(--bdr);border-radius:5px;overflow:hidden;cursor:pointer;position:relative;transition:all .2s}
+.ss-t:hover{border-color:var(--acc)}
+.ss-t img{width:100%;height:100%;object-fit:cover;display:block}
+.ss-n{position:absolute;bottom:1px;right:2px;font-size:7px;color:#fff;font-family:var(--m);text-shadow:0 1px 3px rgba(0,0,0,.8);font-weight:600}
+.ft{border-top:1px solid var(--bdr);padding:9px 13px;display:flex;gap:6px;flex-shrink:0;background:var(--surf)}
+.ft-btn{flex:1;padding:7px;border-radius:7px;font-family:var(--f);font-size:11px;font-weight:600;cursor:pointer;transition:all .2s;border:1px solid var(--bdr);background:var(--surf2);color:var(--txt2)}
+.ft-btn:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-lt)}
+.ft-btn.pri{background:var(--acc);border-color:var(--acc);color:#fff}
+.ft-btn.pri:hover{background:#4a44d4}
+.ph-ov{display:none;position:fixed;inset:0;background:rgba(15,15,35,.6);z-index:9999;align-items:center;justify-content:center}
+.ph-ov.on{display:flex}
+.ph-ov img{max-width:90%;max-height:90vh;border-radius:8px;border:1px solid var(--bdr);box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.ph-x{position:absolute;top:12px;right:12px;width:30px;height:30px;background:var(--surf);border:1px solid var(--bdr);border-radius:7px;color:var(--txt);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--bdr);border-radius:2px}
+</style>
+</head>
+<body>
+<div class="hd">
+  <div class="logo"><div class="logo-i">&#x1F916;</div><div class="logo-t">LivePilot</div></div>
+  <button class="btn-x" id="btnX">&#x2715;</button>
+</div>
+<div class="stat">
+  <div class="cur" id="curAct">No task running</div>
+  <div class="pb"><div class="pf" id="pf"></div></div>
+  <div class="pm"><span id="stLbl">Ready</span><span id="pctLbl">0%</span></div>
+</div>
+<div class="body">
+  <div class="sec-lbl">Execution Timeline</div>
+  <div class="tl" id="tl"><div data-ph style="text-align:center;padding:24px;color:var(--mut);font-size:11px">Open popup and run a task to see live steps.</div></div>
+  <div class="ss-sec" id="ssSec" hidden>
+    <div class="ss-lbl">Screenshots</div>
+    <div class="ss-grid" id="ssGrid"></div>
+  </div>
+</div>
+<div class="ft">
+  <button class="ft-btn" id="btnClr">Clear</button>
+  <button class="ft-btn pri" id="btnPop">Open Popup &#x2197;</button>
+</div>
+<div class="ph-ov" id="phOv">
+  <button class="ph-x" id="btnPhX">&#x2715;</button>
+  <img id="phImg" src="" alt="">
+</div>
+<script src="sidebar.js"></script>
+</body>
+</html>
