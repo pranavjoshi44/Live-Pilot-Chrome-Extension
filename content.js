@@ -1,5 +1,74 @@
 // LivePilot content.js v5 — 15-strategy selector engine + deep DOM snapshot
 'use strict';
+
+// ── CLICK MARKER (Scribehow-style red box + dot, baked into the live page so
+// chrome.tabs.captureVisibleTab rasterizes it as part of the screenshot) ──
+// Shared across the executor and recorder IIFEs below.
+if(!window.__lpMark){
+  (function(){
+    var markers=[];
+    function clear(){ markers.forEach(function(n){ try{ n.remove(); }catch(_){} }); markers=[]; }
+    window.__lpMark=function(el,x,y,ttlMs){
+      clear();
+      ttlMs=ttlMs||1800; // comfortably outlast the ~280ms pre-action pause + screenshot round-trip; still clearly visible live
+      if(el){
+        var r;
+        try{ r=el.getBoundingClientRect(); }catch(_){ r=null; }
+        if(r&&(r.width||r.height)){
+          var box=document.createElement('div');
+          box.style.cssText='position:fixed;pointer-events:none;z-index:2147483647;'+
+            'left:'+(r.left-4)+'px;top:'+(r.top-4)+'px;width:'+(r.width+8)+'px;height:'+(r.height+8)+'px;'+
+            'border:3px solid #ff3b30;border-radius:6px;'+
+            'box-shadow:0 0 0 3px rgba(255,59,48,.22),0 0 14px rgba(255,59,48,.6);';
+          document.documentElement.appendChild(box);
+          markers.push(box);
+        }
+      }
+      if(typeof x==='number'&&typeof y==='number'){
+        var dot=document.createElement('div');
+        dot.style.cssText='position:fixed;pointer-events:none;z-index:2147483647;'+
+          'left:'+(x-9)+'px;top:'+(y-9)+'px;width:18px;height:18px;border-radius:50%;'+
+          'background:rgba(255,59,48,.45);border:2px solid #ff3b30;box-shadow:0 0 0 6px rgba(255,59,48,.18);';
+        document.documentElement.appendChild(dot);
+        markers.push(dot);
+      }
+      setTimeout(clear,ttlMs);
+    };
+  })();
+}
+
+// Straight to background.js's CAPTURE_SCREENSHOT handler (no side-panel hop),
+// resolving only once the screenshot bytes are actually in hand — shared by
+// the executor (captures before a programmatic click/type) and the recorder
+// (captures before the page can react to a real one) below.
+//
+// Recording an action must NEVER depend on a screenshot actually succeeding:
+// chrome.tabs.captureVisibleTab is rate-limited (~2 calls/sec — back-to-back
+// clicks can exceed it) and a freshly-woken MV3 service worker can in rare
+// cases drop a message without ever invoking its callback at all. Either
+// failure mode used to leave this promise hanging forever, which silently
+// stalled every action recorded after it (the symptom: recording works for
+// the first click or two, then nothing else ever gets logged again).
+if(!window.__lpCapture){
+  window.__lpCapture=function(){
+    return new Promise(function(resolve){
+      var done=false;
+      function finish(v){ if(done) return; done=true; resolve(v); }
+      var now=Date.now();
+      if(now-(window.__lpLastCaptureAt||0) < 600){ finish(null); return; } // stay under the rate limit — skip the shot, never the action
+      window.__lpLastCaptureAt=now;
+      var to=setTimeout(function(){ finish(null); },1500); // hard ceiling — a stuck capture can't block recording
+      try{
+        chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'}, function(r){
+          clearTimeout(to);
+          if(chrome.runtime.lastError){ finish(null); return; }
+          finish(r&&r.url?r.url:null);
+        });
+      }catch(_){ clearTimeout(to); finish(null); }
+    });
+  };
+}
+
 (function(){
   if(window.__lp_injected) return;
   window.__lp_injected = true;
@@ -16,6 +85,13 @@
       case 'DOM_SNAPSHOT':
         sendResponse(getDOMSnapshot(msg.opts||{}));
         return false;
+      case 'WAIT_QUIET':
+        // This is always used to get a clean "page has settled" shot (navigate,
+        // extract, etc.) — drop any leftover click marker so it can't bleed
+        // into a screenshot it has nothing to do with.
+        if(window.__lpMark) window.__lpMark();
+        waitForQuiet(msg.maxMs||2500, msg.quietMs||500, msg.minMs||600).then(function(){ sendResponse({ok:true}); });
+        return true;
       case 'TOGGLE_SIDEBAR': toggleSidebar(); sendResponse({ok:true}); break;
       case 'PING': sendResponse({ok:true}); break;
     }
@@ -37,34 +113,51 @@
     if(action==='click'){
       return waitForEl(target,6000).then(function(el){
         if(!el) return {error:'click: element not found — '+target};
-        highlight(el); scrollIntoView(el); el.click();
-        return {success:true};
+        scrollIntoView(el); highlight(el);
+        // Capture and WAIT for the actual screenshot bytes before touching
+        // the element — a fire-and-forget "I'm about to click" signal isn't
+        // enough, since the click can fire before that message even finishes
+        // its round trip. Only once we're holding the captured image do we
+        // know for certain the page still looks like it did pre-click.
+        return captureNow().then(function(shot){
+          return wait(120).then(function(){ el.click(); return {success:true, screenshot:shot}; });
+        });
       });
     }
     if(action==='type'){
       return waitForEl(target,6000).then(function(el){
         if(!el) return {error:'type: input not found — '+target};
-        highlight(el); scrollIntoView(el); el.focus();
-        setNativeValue(el, value||'');
-        el.dispatchEvent(new Event('input',{bubbles:true}));
-        el.dispatchEvent(new Event('change',{bubbles:true}));
-        return {success:true};
+        scrollIntoView(el); highlight(el);
+        return captureNow().then(function(shot){
+          return wait(120).then(function(){
+            el.focus();
+            setNativeValue(el, value||'');
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            el.dispatchEvent(new Event('change',{bubbles:true}));
+            return {success:true, screenshot:shot};
+          });
+        });
       });
     }
     if(action==='press_enter'){
       return waitForEl(target,3000).then(function(el){
         var t=el||document.activeElement;
-        if(t){
-          fireKey(t,'keydown');
-          fireKey(t,'keypress');
-          fireKey(t,'keyup');
-          var form=t.closest?t.closest('form'):null;
-          if(form){
-            var sub=form.querySelector('[type="submit"]');
-            if(sub) sub.click();
-          }
-        }
-        return {success:true};
+        var shotP = t ? (scrollIntoView(t), highlight(t), captureNow()) : Promise.resolve(null);
+        return shotP.then(function(shot){
+          return wait(120).then(function(){
+            if(t){
+              fireKey(t,'keydown');
+              fireKey(t,'keypress');
+              fireKey(t,'keyup');
+              var form=t.closest?t.closest('form'):null;
+              if(form){
+                var sub=form.querySelector('[type="submit"]');
+                if(sub) sub.click();
+              }
+            }
+            return {success:true, screenshot:shot};
+          });
+        });
       });
     }
     if(action==='extract'){
@@ -213,6 +306,33 @@
     }catch(_){ return true; }
   }
 
+  // Resolves once the page has stopped mutating for `quietMs`, or after
+  // `maxMs` regardless — so a screenshot taken right after isn't capturing a
+  // half-loaded "Loading…" skeleton on slower, AJAX-heavy pages.
+  // `minMs` is a settle floor: most clicks kick off an XHR/fetch that takes a
+  // beat before its *first* DOM update even lands, which can easily exceed
+  // quietMs on its own — without a floor, "nothing has mutated yet" gets
+  // misread as "already settled" and we'd resolve before the load even starts.
+  function waitForQuiet(maxMs,quietMs,minMs){
+    return new Promise(function(resolve){
+      var done=false, quietTimer=null, maxTimer=null, obs=null, start=Date.now();
+      function finish(){
+        if(done) return; done=true;
+        if(obs){ try{ obs.disconnect(); }catch(_){} }
+        clearTimeout(quietTimer); clearTimeout(maxTimer);
+        setTimeout(resolve,50); // tiny trailing pause to let the final paint flush
+      }
+      function resetQuiet(){
+        clearTimeout(quietTimer);
+        var remaining = Math.max(quietMs, minMs-(Date.now()-start));
+        quietTimer = setTimeout(finish,remaining);
+      }
+      try{ obs=new MutationObserver(resetQuiet); obs.observe(document.body,{childList:true,subtree:true,attributes:true,characterData:true}); }catch(_){}
+      maxTimer=setTimeout(finish,maxMs);
+      resetQuiet();
+    });
+  }
+
   function waitForEl(sel,timeout){
     var found=findBest(sel);
     if(found) return Promise.resolve(found);
@@ -255,17 +375,20 @@
     el.dispatchEvent(new KeyboardEvent(type,{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));
   }
 
+  function wait(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
+
+  function captureNow(){ return window.__lpCapture(); }
+
   function scrollIntoView(el){
-    try{ el.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'}); }catch(_){}
+    // Instant, not smooth — the highlight marker snapshots el's rect right after
+    // this call, so an animated scroll would leave the box trailing behind
+    // (and stale) while the page is still settling into place.
+    try{ el.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}); }catch(_){
+      try{ el.scrollIntoView(); }catch(__){}
+    }
   }
 
-  function highlight(el){
-    if(!el) return;
-    var prev=el.style.outline;
-    el.style.transition='outline .1s';
-    el.style.outline='2px solid #5b52e8';
-    setTimeout(function(){ el.style.outline=prev; },700);
-  }
+  function highlight(el,x,y,ttlMs){ window.__lpMark(el,x,y,ttlMs); }
 
   function getParentHref(el){
     var p=el;
@@ -401,6 +524,7 @@
   var handlers = {};
   var lastInputEl = null;
   var lastInputTimeout = null;
+  var lastInteractionAt = 0; // set whenever a click/type/press_enter is recorded
 
   function emit(action){
     chrome.runtime.sendMessage({type:'RECORDED_ACTION', action:action}, function(){
@@ -455,7 +579,34 @@
     var sel=bestSelector(el);
     if(!sel) return;
     var text=getDescText(el);
-    emit({action:'click', target:sel, description:'Click: '+(text||sel), value:'', sensitive:false});
+    window.__lpMark(el,e.clientX,e.clientY);
+    // The real click event has already fired by the time this resolves (it's
+    // dispatched synchronously right after mouseup, before any async code of
+    // ours can run) — there's no way to get strictly "before" for a human's
+    // own click. Capturing as the very first thing we do, with no relay hop,
+    // is the closest achievable: it's racing the click's own effects rather
+    // than something that waited for them to finish first.
+    window.__lpCapture().then(function(shot){
+      lastInteractionAt=Date.now();
+      emit({action:'click', target:sel, description:'Click: '+(text||sel), value:'', sensitive:false, screenshot:shot});
+    });
+  }
+
+  // Marks + captures + emits whatever's pending in lastInputEl, if anything.
+  // Shared by the debounced input flush, the Enter-key flush, and the
+  // STOP_RECORDING flush so all three get the same "screenshot before
+  // anything else can change" treatment as a real click.
+  function flushPendingInput(){
+    if(!lastInputEl) return Promise.resolve();
+    var el=lastInputEl, val=lastInputEl.value, sensitive=lastInputEl.type==='password';
+    lastInputEl=null;
+    var sel=bestSelector(el);
+    if(!sel) return Promise.resolve();
+    window.__lpMark(el);
+    return window.__lpCapture().then(function(shot){
+      lastInteractionAt=Date.now();
+      emit({action:'type', target:sel, value:val, description:'Type "'+val.slice(0,40)+'" in '+sel, sensitive:sensitive, screenshot:shot});
+    });
   }
 
   function onInput(e){
@@ -466,11 +617,8 @@
     // Debounce — emit type after 800ms pause to capture full value
     clearTimeout(lastInputTimeout);
     lastInputTimeout=setTimeout(function(){
-      if(!lastInputEl||!isRecording) return;
-      var sel=bestSelector(lastInputEl);
-      if(!sel) return;
-      emit({action:'type', target:sel, value:lastInputEl.value, description:'Type "'+lastInputEl.value.slice(0,40)+'" in '+sel, sensitive:lastInputEl.type==='password'});
-      lastInputEl=null;
+      if(!isRecording) return;
+      flushPendingInput();
     },800);
   }
 
@@ -479,14 +627,16 @@
     if(e.key==='Enter'){
       // Flush any pending input first
       clearTimeout(lastInputTimeout);
-      if(lastInputEl){
-        var isel=bestSelector(lastInputEl);
-        if(isel) emit({action:'type', target:isel, value:lastInputEl.value, description:'Type "'+lastInputEl.value.slice(0,40)+'" in '+isel, sensitive:lastInputEl.type==='password'});
-        lastInputEl=null;
-      }
-      var el=e.target||document.activeElement;
-      var sel=bestSelector(el);
-      if(sel) emit({action:'press_enter', target:sel, description:'Press Enter on '+sel, value:'', sensitive:false});
+      flushPendingInput().then(function(){
+        var el=e.target||document.activeElement;
+        var sel=bestSelector(el);
+        if(!sel) return;
+        window.__lpMark(el);
+        return window.__lpCapture().then(function(shot){
+          lastInteractionAt=Date.now();
+          emit({action:'press_enter', target:sel, description:'Press Enter on '+sel, value:'', sensitive:false, screenshot:shot});
+        });
+      });
     }
     // Capture Cmd/Ctrl+A (select all) for awareness
   }
@@ -512,20 +662,18 @@
       document.addEventListener('mouseup',  handlers.mouseup,  true);
       document.addEventListener('input',    handlers.input,    true);
       document.addEventListener('keydown',  handlers.keydown,  true);
-      // Emit initial page as context
-      emit({action:'navigate', target:window.location.href, description:'Recording started on '+window.location.href, value:'', sensitive:false});
+      // Emit initial page as context — for a resumed recording (the side
+      // panel re-sends this after a full navigation tore down the previous
+      // content.js instance) this is really just "you ended up here", so
+      // word it as a destination rather than implying recording just began.
+      emit({action:'navigate', target:window.location.href, description:(msg.resumed?'Page loaded: ':'Recording started on ')+window.location.href, value:'', sensitive:false});
       sendResponse({ok:true, url:window.location.href});
       return true;
     }
     if(msg.type==='STOP_RECORDING'){
       isRecording=false;
       clearTimeout(lastInputTimeout);
-      // Flush pending input
-      if(lastInputEl){
-        var isel=bestSelector(lastInputEl);
-        if(isel) emit({action:'type', target:isel, value:lastInputEl.value, description:'Type "'+lastInputEl.value.slice(0,40)+'"', sensitive:lastInputEl.type==='password'});
-        lastInputEl=null;
-      }
+      flushPendingInput();
       if(handlers.mouseup) document.removeEventListener('mouseup', handlers.mouseup, true);
       if(handlers.input)   document.removeEventListener('input',   handlers.input,   true);
       if(handlers.keydown) document.removeEventListener('keydown', handlers.keydown, true);
@@ -535,12 +683,19 @@
     }
   });
 
-  // Detect page navigations (SPA)
+  // Detect page navigations (SPA route changes — e.g. clicking a tab that
+  // updates the URL without a full reload)
   var lastHref=window.location.href;
   setInterval(function(){
     if(!isRecording) return;
     if(window.location.href!==lastHref){
       lastHref=window.location.href;
+      // A click/type/press_enter recorded moments ago almost always *caused*
+      // this URL change (an SPA tab/route switch) — that step already shows
+      // what was clicked, so adding a second "Opened <url>" step here would
+      // just be a near-duplicate of the same interaction, with a screenshot
+      // that's really just whatever marker happened to still be on screen.
+      if(Date.now()-lastInteractionAt < 1500) return;
       emit({action:'navigate', target:lastHref, description:'Navigated to '+lastHref, value:'', sensitive:false});
     }
   },1000);

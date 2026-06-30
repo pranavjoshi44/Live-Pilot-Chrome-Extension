@@ -11,14 +11,26 @@ var G = {
   planResolve: null, confResolve: null, varResolve: null, delResolve: null,
   timerInterval: null, startTime: null, currentTabId: null,
   isRecording: false, currentRecording: null, savingRecording: false,
+  lastTask: '', pendingGuide: null, skipSavePrompt: false, confluence: null,
 };
 
 function q(id) { var e=document.getElementById(id); if(!e) console.warn('[LP] missing:',id); return e; }
 function sleep(ms) { return new Promise(function(r){setTimeout(r,ms);}); }
 
+// chrome.storage.local.set() returns a promise in MV3 — call it bare (no
+// callback, no .catch) and a quota failure becomes an invisible "Uncaught
+// (in promise)" console error instead of something the user ever sees.
+// Recordings carry screenshots and are by far the most likely thing to hit
+// the quota, so failures here get a real, visible log line.
+function saveLocal(items){
+  chrome.storage.local.set(items).catch(function(e){
+    addLog('⚠ Could not save: '+e.message+' — try clearing old recordings.','err');
+  });
+}
+
 // ── BOOT ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-  chrome.storage.local.get(['apiKey','model','workflows','settings','history','vars','recordings','onboarded'], function(d) {
+  chrome.storage.local.get(['apiKey','model','workflows','settings','history','vars','recordings','onboarded','confluence'], function(d) {
     if (d.apiKey)     { G.apiKey=d.apiKey; bannerOk(true); }
     if (d.model)      { G.model=d.model; q('mdlSel').value=G.model; updateMdlPill(); }
     if (d.workflows)  { G.workflows=Array.isArray(d.workflows)?d.workflows:[]; }
@@ -26,6 +38,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (d.history)    { G.history=Array.isArray(d.history)?d.history:[]; }
     if (d.vars)       { G.vars=d.vars; loadVarInputs(); }
     if (d.recordings) { G.recordings=Array.isArray(d.recordings)?d.recordings:[]; }
+    if (d.confluence) { G.confluence=d.confluence; loadConfluenceInputs(); }
     applyToggles(); renderHistory(); renderRecordings();
     if (!d.onboarded) startOnboarding(); else q('onboarding').classList.add('hide');
   });
@@ -52,9 +65,12 @@ function wireEvents() {
   q('btnStop').addEventListener('click', stopTask);
   q('btnRecord').addEventListener('click', toggleRecording);
   q('btnClearTask').addEventListener('click', clearTaskAndLog);
-  q('btnSaveWf').addEventListener('click', saveWorkflow);
   q('btnCopyLog').addEventListener('click', copyLog);
   // Results
+  q('btnGenDoc').addEventListener('click', function(){
+    if(!G.shots.length){ addLog('No screenshots captured — enable Auto Screenshots in Settings, then re-run.','inf'); return; }
+    openDocModal(LPDoc.fromRun(G.lastTask, G.plan, G.shots));
+  });
   q('btnExportCSV').addEventListener('click', exportCSV);
   q('btnExportTxt').addEventListener('click', exportTxt);
   q('btnCopyResult').addEventListener('click', copyResult);
@@ -85,13 +101,33 @@ function wireEvents() {
   // Delete
   q('btnDelYes').addEventListener('click', function(){ resolveDelModal(true); });
   q('btnDelNo').addEventListener('click',  function(){ resolveDelModal(false); });
+  // Generate Document
+  q('btnDocPdf').addEventListener('click', function(){ runDocGen(LPDoc.generatePDF, q('btnDocPdf')); });
+  q('btnDocWord').addEventListener('click', function(){ runDocGen(LPDoc.generateDOCX, q('btnDocWord')); });
+  q('btnDocGoogle').addEventListener('click', function(){ runDocGen(generateDocxAndOpenDrive, q('btnDocGoogle')); });
+  q('btnDocConfluence').addEventListener('click', function(){
+    if(!G.confluence){
+      q('docModal').classList.remove('on');
+      switchPane('settings',q('navSettings'));
+      addLog('Set up Confluence in Settings first, then try publishing again.','inf');
+      return;
+    }
+    runDocGen(publishToConfluence, q('btnDocConfluence'));
+  });
+  q('btnDocCancel').addEventListener('click', function(){ q('docModal').classList.remove('on'); });
+  q('docModal').addEventListener('click', function(e){ if(e.target===q('docModal')) q('docModal').classList.remove('on'); });
   // Settings
-  document.querySelectorAll('.tog').forEach(function(t){ t.addEventListener('click', function(){ t.classList.toggle('on'); G.settings[t.dataset.key]=t.classList.contains('on'); chrome.storage.local.set({settings:G.settings}); }); });
-  q('mdlSel').addEventListener('change', function(){ G.model=q('mdlSel').value; updateMdlPill(); chrome.storage.local.set({model:G.model}); });
-  document.querySelectorAll('.var-inp').forEach(function(inp){ inp.addEventListener('change', function(){ G.vars[inp.dataset.var]=inp.value.trim(); chrome.storage.local.set({vars:G.vars}); detectVars(); }); });
+  document.querySelectorAll('.tog').forEach(function(t){ t.addEventListener('click', function(){ t.classList.toggle('on'); G.settings[t.dataset.key]=t.classList.contains('on'); saveLocal({settings:G.settings}); }); });
+  q('mdlSel').addEventListener('change', function(){ G.model=q('mdlSel').value; updateMdlPill(); saveLocal({model:G.model}); });
+  document.querySelectorAll('.var-inp').forEach(function(inp){ inp.addEventListener('change', function(){ G.vars[inp.dataset.var]=inp.value.trim(); saveLocal({vars:G.vars}); detectVars(); }); });
   q('wfSearch').addEventListener('input', function(){ renderWfItems(q('wfSearch').value.trim()); });
-  q('btnHistClear').addEventListener('click', function(){ showDel('Clear History','Remove all task history?').then(function(y){ if(!y) return; G.history=[]; chrome.storage.local.set({history:G.history}); renderHistory(); }); });
-  q('btnRecClear').addEventListener('click', function(){ showDel('Clear Recordings','Delete all recordings?').then(function(y){ if(!y) return; G.recordings=[]; chrome.storage.local.set({recordings:G.recordings}); renderRecordings(); }); });
+  q('btnHistClear').addEventListener('click', function(){ showDel('Clear History','Remove all task history?').then(function(y){ if(!y) return; G.history=[]; saveLocal({history:G.history}); renderHistory(); }); });
+  q('btnRecClear').addEventListener('click', function(){ showDel('Clear Recordings','Delete all recordings?').then(function(y){ if(!y) return; G.recordings=[]; saveLocal({recordings:G.recordings}); renderRecordings(); }); });
+  q('btnEditRecBack').addEventListener('click', closeEditRecording);
+  q('btnEditRecSave').addEventListener('click', saveEditedRecording);
+  q('btnEditRecAdd').addEventListener('click', addEditStep);
+  q('confType').addEventListener('change', updateConfluenceTypeUI);
+  q('btnConfSave').addEventListener('click', saveConfluenceSettings);
   q('btnClear').addEventListener('click', clearAll);
 }
 
@@ -104,17 +140,50 @@ function verifyApiKey() {
   var key=q('obApiInp').value.trim(); if(!key){ setObStatus('\u2717 Enter your API key','err'); return; }
   var btn=q('btnObVerify'); btn.disabled=true; btn.textContent='Verifying\u2026'; setObStatus('','');
   fetch('https://api.groq.com/openai/v1/models',{headers:{'Authorization':'Bearer '+key}}).then(function(r){
-    if(r.ok){ G.apiKey=key; chrome.storage.local.set({apiKey:key}); bannerOk(true); setObStatus('\u2713 Connected!','ok'); setTimeout(function(){obGoStep(3);},800); }
+    if(r.ok){ G.apiKey=key; saveLocal({apiKey:key}); bannerOk(true); setObStatus('\u2713 Connected!','ok'); setTimeout(function(){obGoStep(3);},800); }
     else { setObStatus('\u2717 Invalid key — try again','err'); btn.disabled=false; btn.textContent='Verify & Continue \u2192'; }
   }).catch(function(){ setObStatus('\u2717 Network error','err'); btn.disabled=false; btn.textContent='Verify & Continue \u2192'; });
 }
 function setObStatus(txt,cls){ var el=q('obApiStatus'); el.textContent=txt; el.className='ob-api-status'+(cls?' '+cls:''); }
-function finishOnboarding() { chrome.storage.local.set({onboarded:true}); q('onboarding').classList.add('hide'); }
+function finishOnboarding() { saveLocal({onboarded:true}); q('onboarding').classList.add('hide'); }
 
 // ── API ───────────────────────────────────────────────────────────────────────
 function toggleApiBox(){ var b=q('apiBox'); b.classList.toggle('on'); if(b.classList.contains('on')&&G.apiKey) q('apiInp').value=G.apiKey; }
-function saveApiKey(){ var k=q('apiInp').value.trim(); if(!k) return; G.apiKey=k; chrome.storage.local.set({apiKey:k}); bannerOk(true); q('apiBox').classList.remove('on'); }
+function saveApiKey(){ var k=q('apiInp').value.trim(); if(!k) return; G.apiKey=k; saveLocal({apiKey:k}); bannerOk(true); q('apiBox').classList.remove('on'); }
 function bannerOk(ok){ if(ok){q('apiBan').classList.add('ok');q('banTxt').textContent='\u2713 Groq API connected \u2014 Ready';}else{q('apiBan').classList.remove('ok');q('banTxt').textContent='Configure Groq API Key to start';} }
+
+// ── CONFLUENCE ────────────────────────────────────────────────────────────────
+function updateConfluenceTypeUI(){
+  var isCloud=q('confType').value==='cloud';
+  q('confEmailRow').style.display=isCloud?'':'none';
+  q('confTokenLbl').textContent=isCloud?'API Token':'Personal Access Token';
+  q('confToken').placeholder=isCloud?'from id.atlassian.com':'from your profile settings';
+}
+function loadConfluenceInputs(){
+  var c=G.confluence; if(!c) return;
+  q('confType').value=c.type||'cloud';
+  q('confUrl').value=c.baseUrl||'';
+  q('confEmail').value=c.email||'';
+  q('confToken').value=c.token||'';
+  q('confSpace').value=c.spaceKey||'';
+  updateConfluenceTypeUI();
+  q('confStatus').textContent='\u2713 Saved'; q('confStatus').className='conf-status ok';
+}
+function saveConfluenceSettings(){
+  var type=q('confType').value;
+  var baseUrl=q('confUrl').value.trim().replace(/\/+$/,'');
+  var email=q('confEmail').value.trim();
+  var token=q('confToken').value.trim();
+  var spaceKey=q('confSpace').value.trim();
+  var status=q('confStatus');
+  if(!baseUrl||!/^https?:\/\//.test(baseUrl)){ status.textContent='Enter a full site URL (https://...)'; status.className='conf-status err'; return; }
+  if(!token){ status.textContent='Enter your '+(type==='cloud'?'API token':'personal access token'); status.className='conf-status err'; return; }
+  if(type==='cloud'&&!email){ status.textContent='Enter the email you use to sign in to Confluence'; status.className='conf-status err'; return; }
+  if(!spaceKey){ status.textContent='Enter the space key to publish into'; status.className='conf-status err'; return; }
+  G.confluence={type:type,baseUrl:baseUrl,email:email,token:token,spaceKey:spaceKey};
+  saveLocal({confluence:G.confluence});
+  status.textContent='\u2713 Saved'; status.className='conf-status ok';
+}
 
 // ── SMART VARIABLES ───────────────────────────────────────────────────────────
 function detectVars() {
@@ -124,14 +193,14 @@ function detectVars() {
   if(!found.length){row.classList.remove('on');return;} row.classList.add('on');
   found.forEach(function(name){var chip=document.createElement('span'),val=G.vars[name]; chip.className='var-chip'+(val?'':' unset'); chip.textContent='{{'+name+'}}'+(val?': '+val.slice(0,10):' (unset)'); chip.addEventListener('click',function(){promptVar(name);}); row.appendChild(chip);});
 }
-function promptVar(name){return new Promise(function(resolve){G.varResolve=resolve;q('varModalLabel').textContent='{{'+name+'}}';q('varModalInp').value=G.vars[name]||'';q('varModal').classList.add('on');q('varModalInp').focus();}).then(function(val){if(val){G.vars[name]=val;chrome.storage.local.set({vars:G.vars});}loadVarInputs();detectVars();return val;});}
+function promptVar(name){return new Promise(function(resolve){G.varResolve=resolve;q('varModalLabel').textContent='{{'+name+'}}';q('varModalInp').value=G.vars[name]||'';q('varModal').classList.add('on');q('varModalInp').focus();}).then(function(val){if(val){G.vars[name]=val;saveLocal({vars:G.vars});}loadVarInputs();detectVars();return val;});}
 function resolveVar(val){q('varModal').classList.remove('on');if(G.varResolve){G.varResolve(val);G.varResolve=null;}}
 function resolveTaskVars(task){var matches=task.match(/\{\{([a-zA-Z0-9_]+)\}\}/g)||[],unique=[];matches.forEach(function(m){if(unique.indexOf(m)===-1)unique.push(m);});if(!unique.length)return Promise.resolve(task);var chain=Promise.resolve(task);unique.forEach(function(m){var name=m.slice(2,-2);chain=chain.then(function(t){if(G.vars[name])return t.split(m).join(G.vars[name]);return promptVar(name).then(function(v){return v?t.split(m).join(v):t;});});});return chain;}
 function loadVarInputs(){document.querySelectorAll('.var-inp').forEach(function(inp){inp.value=G.vars[inp.dataset.var]||'';});}
 
 // ── HISTORY ───────────────────────────────────────────────────────────────────
-function addToHistory(task){G.history=G.history.filter(function(h){return(typeof h==='string'?h:h.task)!==task;});G.history.unshift({task:task,time:new Date().toLocaleString()});if(G.history.length>20)G.history.length=20;chrome.storage.local.set({history:G.history});renderHistory();}
-function renderHistory(){var c=q('histList');if(!c)return;c.innerHTML='';if(!G.history.length){c.appendChild(mkEmpty('\uD83D\uDD51','No task history yet.'));return;}G.history.forEach(function(entry,idx){var text=typeof entry==='string'?entry:entry.task,time=typeof entry==='object'?entry.time:null;var row=document.createElement('div');row.className='hist-entry';var ico=document.createElement('div');ico.className='hist-ico';ico.textContent='\u26A1';var body=document.createElement('div');body.className='hist-body';var tx=document.createElement('div');tx.className='hist-text';tx.textContent=text;body.appendChild(tx);if(time){var ts=document.createElement('div');ts.className='hist-time';ts.textContent=time;body.appendChild(ts);}var del=document.createElement('button');del.className='hist-del';del.textContent='\u2715';del.addEventListener('click',function(e){e.stopPropagation();G.history.splice(idx,1);chrome.storage.local.set({history:G.history});renderHistory();});row.appendChild(ico);row.appendChild(body);row.appendChild(del);row.addEventListener('click',function(){q('taskInput').value=text;switchPane('agent',q('navAgent'));q('taskInput').focus();detectVars();});c.appendChild(row);});}
+function addToHistory(task){G.history=G.history.filter(function(h){return(typeof h==='string'?h:h.task)!==task;});G.history.unshift({task:task,time:new Date().toLocaleString()});if(G.history.length>20)G.history.length=20;saveLocal({history:G.history});renderHistory();}
+function renderHistory(){var c=q('histList');if(!c)return;c.innerHTML='';if(!G.history.length){c.appendChild(mkEmpty('\uD83D\uDD51','No task history yet.'));return;}G.history.forEach(function(entry,idx){var text=typeof entry==='string'?entry:entry.task,time=typeof entry==='object'?entry.time:null;var row=document.createElement('div');row.className='hist-entry';var ico=document.createElement('div');ico.className='hist-ico';ico.textContent='\u26A1';var body=document.createElement('div');body.className='hist-body';var tx=document.createElement('div');tx.className='hist-text';tx.textContent=text;body.appendChild(tx);if(time){var ts=document.createElement('div');ts.className='hist-time';ts.textContent=time;body.appendChild(ts);}var del=document.createElement('button');del.className='hist-del';del.textContent='\u2715';del.addEventListener('click',function(e){e.stopPropagation();G.history.splice(idx,1);saveLocal({history:G.history});renderHistory();});row.appendChild(ico);row.appendChild(body);row.appendChild(del);row.addEventListener('click',function(){q('taskInput').value=text;switchPane('agent',q('navAgent'));q('taskInput').focus();detectVars();});c.appendChild(row);});}
 
 // ── SESSION RECORDER ──────────────────────────────────────────────────────────
 function toggleRecording(){if(G.isRecording)stopRecording();else startRecording();}
@@ -140,6 +209,8 @@ function startRecording(){
   G.isRecording=true;
   G.currentRecording={id:Date.now(),name:'Recording '+new Date().toLocaleTimeString(),actions:[],screenshots:[],startedAt:new Date().toISOString()};
   q('btnRecord').classList.add('rec-on');
+  q('recIco').textContent='⏹';
+  q('recLbl').textContent='Stop';
   q('recBadge').classList.add('on');
   q('feedBox').classList.add('on');
   addLog('Recording started. Interact with the page.','inf');
@@ -164,6 +235,25 @@ function startRecording(){
 
 function flushRecBuffer(){} // no-op, replaced by direct message listener
 
+// A full-page navigation (not just an SPA route change) tears down
+// content.js's entire JS context — isRecording resets to false and its
+// event listeners go with it. Without this, recording silently stops the
+// moment the user clicks any link/button that does a real navigation (e.g.
+// a "Home" link), even though the side panel still shows it as active.
+// content.js's own START_RECORDING handler already no-ops if it's somehow
+// already recording, so this can safely fire on every 'complete' with no
+// extra dedup bookkeeping needed here.
+chrome.tabs.onUpdated.addListener(function(tabId, info, tab){
+  if(!G.isRecording || tabId!==G.currentTabId || info.status!=='complete') return;
+  if(!tab.url || /^chrome(-extension)?:\/\//.test(tab.url)) return; // can't inject into privileged pages
+  chrome.scripting.executeScript({target:{tabId:tabId},files:['content.js']},function(){
+    if(chrome.runtime.lastError) return;
+    setTimeout(function(){
+      chrome.tabs.sendMessage(tabId,{type:'START_RECORDING',resumed:true},function(){});
+    },250);
+  });
+});
+
 // Receives RECORDED_ACTION re-broadcast from background.js
 chrome.runtime.onMessage.addListener(function(msg) {
   if (msg.type !== 'RECORDED_ACTION') return;
@@ -179,17 +269,48 @@ chrome.runtime.onMessage.addListener(function(msg) {
     if (existing.length) return;
   }
   G.currentRecording.actions.push(action);
+  var actionIndex = G.currentRecording.actions.length - 1;
   addLog('\u25CF [' + G.currentRecording.actions.length + '] ' + action.action + ': ' + (action.description||action.target||'').slice(0,50), 'inf');
-  // Capture screenshot after each recorded action
-  chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'}, function(r){
-    if (chrome.runtime.lastError) return;
-    if (r && r.url && G.currentRecording) G.currentRecording.screenshots.push(r.url);
+  if (action.screenshot) {
+    // content.js already captured this one itself, right after drawing the
+    // marker and before the click/type could change anything \u2014 use it as-is.
+    G.currentRecording.screenshots[actionIndex] = action.screenshot;
+    return;
+  }
+  // No pre-captured shot (e.g. a standalone navigate with no recent
+  // click/type behind it) \u2014 wait for the destination to settle before
+  // capturing instead of grabbing one instantly, so this never coincidentally
+  // shows a leftover click marker or a half-loaded page. Written by index
+  // since a slow capture must not land out of order against a faster later one.
+  var recAtCapture = G.currentRecording;
+  waitForPageQuiet(G.currentTabId).then(function(){
+    chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'}, function(r){
+      if (chrome.runtime.lastError) return;
+      if (r && r.url && recAtCapture) recAtCapture.screenshots[actionIndex] = r.url;
+    });
   });
 });
+
+// Resolves once the recorded/automated tab's DOM has stopped mutating (or a
+// hard ceiling elapses) \u2014 used to delay screenshot capture past loading
+// skeletons/spinners instead of a flat guess. Falls back to resolving
+// immediately if the content script can't be reached.
+function waitForPageQuiet(tabId){
+  return new Promise(function(resolve){
+    if(!tabId){ resolve(); return; }
+    var settled=false;
+    var to=setTimeout(function(){ if(!settled){settled=true; resolve();} }, 3000);
+    chrome.tabs.sendMessage(tabId,{type:'WAIT_QUIET',maxMs:2500,quietMs:500,minMs:600},function(){
+      if(settled) return; settled=true; clearTimeout(to); resolve();
+    });
+  });
+}
 
 function stopRecording(){
   G.isRecording=false;
   q('btnRecord').classList.remove('rec-on');
+  q('recIco').textContent='⏺';
+  q('recLbl').textContent='Record';
   q('recBadge').classList.remove('on');
   // Final flush
   flushRecBuffer();
@@ -204,6 +325,7 @@ function stopRecording(){
     addLog('Done: '+G.currentRecording.actions.length+' actions captured.','done');
     G.savingRecording=true;
     q('saveModalTitle').textContent='Save Recording';
+    q('saveModalDesc').textContent='Save it to replay later or generate a step-by-step document from it.';
     q('saveModalInp').value=G.currentRecording.name;
     q('saveModal').classList.add('on');
     setTimeout(function(){q('saveModalInp').focus();q('saveModalInp').select();},50);
@@ -215,7 +337,11 @@ function saveRecording(name){
   var rec=Object.assign({},G.currentRecording);
   rec.screenshots=rec.screenshots.slice(0,15);
   G.recordings.unshift(rec);
-  chrome.storage.local.set({recordings:G.recordings});
+  // Each recording can carry up to 15 screenshots \u2014 with no cap on count,
+  // chrome.storage.local's quota (10MB, even with unlimitedStorage there's
+  // no reason to hoard them) gets a lot closer a lot faster than it looks.
+  if(G.recordings.length>20) G.recordings.length=20;
+  saveLocal({recordings:G.recordings});
   G.currentRecording=null;
   renderRecordings();
   addLog('\uD83D\uDCBE Recording saved: "'+rec.name+'"','done');
@@ -233,10 +359,11 @@ function renderRecordings(){
     var mt=document.createElement('div');mt.className='rec-item-meta';mt.textContent=rec.actions.length+' steps \u00B7 '+new Date(rec.startedAt).toLocaleDateString();
     info.appendChild(nm);info.appendChild(mt);
     var acts=document.createElement('div');acts.className='rec-item-acts';
-    function mkB(txt,fn){var b=document.createElement('button');b.className='wf-btn';b.textContent=txt;b.addEventListener('click',function(e){e.stopPropagation();fn();});return b;}
-    acts.appendChild(mkB('\u25B6',function(){openPlayUI(rec,item);}));
-    acts.appendChild(mkB('\u2193',function(){exportRec(rec);}));
-    acts.appendChild(mkB('\u2715',function(){G.recordings.splice(ri,1);chrome.storage.local.set({recordings:G.recordings});renderRecordings();}));
+    function mkB(txt,cls,title,fn){var b=document.createElement('button');b.className='wf-btn'+(cls?' '+cls:'');b.textContent=txt;b.title=title;b.addEventListener('click',function(e){e.stopPropagation();fn();});return b;}
+    acts.appendChild(mkB('\u25B6','play','Play this recording',function(){openPlayUI(rec,item);}));
+    acts.appendChild(mkB('\u270E','edit','Edit steps \u2014 rewrite text, reorder, delete, or add new ones',function(){openEditRecording(ri);}));
+    acts.appendChild(mkB('\uD83D\uDCC4','doc','Generate a PDF or Word document with screenshots',function(){openDocModal(LPDoc.fromRecording(rec));}));
+    acts.appendChild(mkB('\u2715','del','Delete this recording',function(){G.recordings.splice(ri,1);saveLocal({recordings:G.recordings});renderRecordings();}));
     hd.addEventListener('click',function(){var tl=item.querySelector('.rec-tl');tl.classList.toggle('open');});
     hd.appendChild(ico);hd.appendChild(info);hd.appendChild(acts);
     var tl=document.createElement('div');tl.className='rec-tl';
@@ -251,6 +378,99 @@ function renderRecordings(){
     });
     item.appendChild(hd);item.appendChild(tl);c.appendChild(item);
   });
+}
+
+// ── EDIT RECORDING ──────────────────────────────────────────────────────────
+// Works on a scratch copy (EDIT.actions/screenshots) so closing without
+// saving leaves the stored recording untouched.
+var EDIT={recIndex:-1,actions:[],screenshots:[]};
+
+function openEditRecording(ri){
+  var rec=G.recordings[ri]; if(!rec) return;
+  EDIT.recIndex=ri;
+  EDIT.actions=rec.actions.map(function(a){return Object.assign({},a);});
+  EDIT.screenshots=(rec.screenshots||[]).slice();
+  q('editRecTitle').textContent='Edit: '+rec.name;
+  renderEditSteps();
+  q('editRecOv').classList.add('on');
+}
+
+function closeEditRecording(){
+  q('editRecOv').classList.remove('on');
+  EDIT.recIndex=-1;EDIT.actions=[];EDIT.screenshots=[];
+}
+
+function saveEditedRecording(){
+  if(EDIT.recIndex<0) return;
+  var rec=G.recordings[EDIT.recIndex]; if(!rec) return;
+  rec.actions=EDIT.actions;
+  rec.screenshots=EDIT.screenshots;
+  saveLocal({recordings:G.recordings});
+  addLog('💾 Recording updated: "'+rec.name+'"','done');
+  renderRecordings();
+  closeEditRecording();
+}
+
+function renderEditSteps(){
+  var c=q('editRecList'); c.innerHTML='';
+  if(!EDIT.actions.length){ c.appendChild(mkEmpty('📝','No steps yet — add one below.')); return; }
+  EDIT.actions.forEach(function(a,i){
+    var card=document.createElement('div'); card.className='edit-step';
+
+    var thumb=document.createElement('div'); thumb.className='edit-step-thumb';
+    if(EDIT.screenshots[i]){
+      var img=document.createElement('img'); img.src=EDIT.screenshots[i]; img.alt='';
+      thumb.appendChild(img); thumb.title='Click to view full size';
+      thumb.addEventListener('click',function(){openSsModal('Step '+(i+1),EDIT.screenshots[i]);});
+    } else {
+      thumb.textContent='📷'; thumb.title='Capture the current tab for this step';
+      thumb.addEventListener('click',function(){
+        chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'},function(r){
+          if(r&&r.url){ EDIT.screenshots[i]=r.url; renderEditSteps(); }
+        });
+      });
+    }
+
+    var body=document.createElement('div'); body.className='edit-step-body';
+    var badge=document.createElement('div'); badge.className='edit-step-badge';
+    badge.textContent=(i+1)+' · '+(LPDoc.humanizeAction(a.action)||a.action);
+    var txt=document.createElement('textarea'); txt.className='edit-step-txt'; txt.rows=2;
+    txt.value=a.description||''; txt.placeholder='Describe this step…';
+    txt.addEventListener('input',function(){ a.description=txt.value; a.edited=true; });
+    body.appendChild(badge); body.appendChild(txt);
+
+    var stepActs=document.createElement('div'); stepActs.className='edit-step-acts';
+    function mkB(label,title,fn){ var b=document.createElement('button'); b.className='edit-step-btn'; b.textContent=label; b.title=title; b.addEventListener('click',fn); return b; }
+    if(i>0) stepActs.appendChild(mkB('▲','Move up',function(){ moveEditStep(i,-1); }));
+    if(i<EDIT.actions.length-1) stepActs.appendChild(mkB('▼','Move down',function(){ moveEditStep(i,1); }));
+    var delBtn=mkB('✕','Delete this step',function(){ deleteEditStep(i); }); delBtn.classList.add('del');
+    stepActs.appendChild(delBtn);
+
+    card.appendChild(thumb); card.appendChild(body); card.appendChild(stepActs);
+    c.appendChild(card);
+  });
+}
+
+function moveEditStep(i,dir){
+  var j=i+dir; if(j<0||j>=EDIT.actions.length) return;
+  var a=EDIT.actions, s=EDIT.screenshots;
+  var ta=a[i]; a[i]=a[j]; a[j]=ta;
+  var ts=s[i]; s[i]=s[j]; s[j]=ts;
+  renderEditSteps();
+}
+
+function deleteEditStep(i){
+  EDIT.actions.splice(i,1);
+  EDIT.screenshots.splice(i,1);
+  renderEditSteps();
+}
+
+function addEditStep(){
+  EDIT.actions.push({action:'note',target:'',value:'',sensitive:false,description:'',edited:true});
+  EDIT.screenshots.push(null);
+  renderEditSteps();
+  var areas=q('editRecList').querySelectorAll('.edit-step-txt');
+  if(areas.length) areas[areas.length-1].focus();
 }
 
 function openPlayUI(rec,item){
@@ -313,7 +533,54 @@ function playSteps(rec,from,delay,slider,timeEl){
   return chain;
 }
 
-function exportRec(rec){var blob=new Blob([JSON.stringify(rec,null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='livepilot-rec-'+rec.name.replace(/\s+/g,'-')+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}
+// ── DOCUMENT GENERATION (PDF / DOCX step guide) ───────────────────────────────
+function openDocModal(guide){
+  G.pendingGuide=guide;
+  q('docModalTitle').textContent='Generate Document — '+(guide.steps.length)+' step'+(guide.steps.length===1?'':'s');
+  q('docModal').classList.add('on');
+}
+
+function runDocGen(genFn,btn){
+  if(!G.pendingGuide) return;
+  var orig=btn.innerHTML;
+  btn.disabled=true; btn.textContent='⏳ Generating…';
+  genFn(G.pendingGuide).then(function(){
+    q('docModal').classList.remove('on');
+    addLog('📄 Document generated: "'+G.pendingGuide.title+'"','done');
+  }).catch(function(e){
+    addLog('✗ Document generation failed: '+e.message,'err');
+  }).then(function(){
+    btn.disabled=false; btn.innerHTML=orig;
+  });
+}
+
+// No Drive API / OAuth wired up (that needs a Google Cloud Client ID this
+// extension doesn't have) — the practical alternative: download the .docx
+// and open Drive so the user can just drag it in. Drive auto-converts a
+// dropped .docx into a native, editable Google Doc.
+function generateDocxAndOpenDrive(guide){
+  return LPDoc.generateDOCX(guide).then(function(){
+    chrome.tabs.create({url:'https://drive.google.com/drive/my-drive'});
+    addLog('📤 Drag the downloaded .docx into the new Google Drive tab — it\'ll convert it to a Google Doc automatically.','inf');
+  });
+}
+
+// Confluence (unlike Google Docs) takes a real API token with no OAuth app
+// needed, so this is an actual publish — not a download-and-drag workaround.
+// All the network calls happen in background.js (CONFLUENCE_PUBLISH), since
+// host_permissions already cover any origin and a service worker isn't
+// bound by page-level CORS the way this side panel's own fetch would be.
+function publishToConfluence(guide){
+  var doc = LPDoc.toConfluenceStorage(guide);
+  return new Promise(function(resolve,reject){
+    chrome.runtime.sendMessage({type:'CONFLUENCE_PUBLISH', config:G.confluence, doc:doc}, function(r){
+      if(chrome.runtime.lastError){ reject(new Error(chrome.runtime.lastError.message)); return; }
+      if(r&&r.error){ reject(new Error(r.error)); return; }
+      if(r&&r.url) chrome.tabs.create({url:r.url});
+      resolve();
+    });
+  });
+}
 
 // ── TIMER ─────────────────────────────────────────────────────────────────────
 function startTimer(){G.startTime=Date.now();G.timerInterval=setInterval(function(){q('feedTimer').textContent=((Date.now()-G.startTime)/1000).toFixed(0)+'s';},1000);}
@@ -398,7 +665,7 @@ function startTask(){
   if(G.running) return;
   resolveTaskVars(raw).then(function(task){
     if(!task) return;
-    G.running=true;G.aborted=false;G.shots=[];G.log=[];G.done=0;G.total=0;G.plan=null;G.extractedData=[];
+    G.running=true;G.aborted=false;G.shots=[];G.log=[];G.done=0;G.total=0;G.plan=null;G.extractedData=[];G.lastTask=task;
     resetFeed();setRunning(true);
     q('feedBox').classList.add('on');q('feedLive').hidden=false;q('btnStop').hidden=false;q('btnCopyLog').hidden=false;
     startTimer();addLog('Planning\u2026','inf');addToHistory(raw);
@@ -462,8 +729,14 @@ function runSteps(task,plan,tabId,i){
   else execStep(task,plan,tabId,i,step);
 }
 
+// Actions where content.js highlights a specific element before acting on it
+// and, as part of the same EXEC call, captures+returns the screenshot taken
+// the instant before the click/type fires — see captureNow() in content.js.
+var HIGHLIGHT_ACTIONS = {click:1, type:1, press_enter:1};
+
 function execStep(task,plan,tabId,i,step){
   doAction(tabId,step).then(function(r){
+    if(r&&r.screenshot){G.shots[i]={step:i+1,url:r.screenshot};addThumb(r.screenshot,i+1);}
     if(r&&r.error){
       addLog('\u2717 '+r.error,'err');
       healStep(tabId,step,r.error,task).then(function(h){
@@ -495,9 +768,18 @@ function accumulateData(r){
 function afterStep(task,plan,tabId,i){
   G.done=i+1;setProgress(G.done,G.total);
   if(!G.settings.screenshots){runSteps(task,plan,tabId,i+1);return;}
-  sleep(700).then(function(){
+  var step=plan[i];
+  if(HIGHLIGHT_ACTIONS[step.action]){
+    // Screenshot was already captured pre-action inside the EXEC call itself
+    // (see execStep above) — capturing again here would just show whatever
+    // the click/type led to (possibly mid-navigation or mid-AJAX-reload),
+    // overwriting the correct one.
+    runSteps(task,plan,tabId,i+1);
+    return;
+  }
+  waitForPageQuiet(tabId).then(function(){
     chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'},function(r){
-      if(r&&r.url){G.shots.push({step:i+1,url:r.url});addThumb(r.url,i+1);}
+      if(r&&r.url){G.shots[i]={step:i+1,url:r.url};addThumb(r.url,i+1);}
       runSteps(task,plan,tabId,i+1);
     });
   });
@@ -604,8 +886,13 @@ function clearTaskAndLog(){
 
 function setProgress(done,total){if(total>0)q('progFill').style.width=Math.round(done/total*100)+'%';}
 function setRunning(on){q('btnRun').disabled=on;var ico=q('runIco');ico.textContent=on?'\u21BB':'\u25B6';ico.style.animation=on?'spin .7s linear infinite':'none';q('runLbl').textContent=on?'Running\u2026':'Run Task';q('dot').className='dot'+(on?' run':'');}
-function onFinish(summary){G.running=false;stopTimer();setRunning(false);q('feedLive').hidden=true;q('btnStop').hidden=true;q('dot').className='dot done';q('progFill').style.width='100%';addLog('Done.','done');showResultPanel(summary);}
-function onAbort(){G.running=false;stopTimer();setRunning(false);q('feedLive').hidden=true;q('btnStop').hidden=true;addLog('Cancelled.','inf');}
+function onFinish(summary){
+  G.running=false;stopTimer();setRunning(false);q('feedLive').hidden=true;q('btnStop').hidden=true;q('dot').className='dot done';q('progFill').style.width='100%';addLog('Done.','done');showResultPanel(summary);
+  var shouldPrompt=G.plan&&G.plan.length&&!G.skipSavePrompt;
+  G.skipSavePrompt=false;
+  if(shouldPrompt) setTimeout(promptSaveWorkflow,700); // let the result panel render first
+}
+function onAbort(){G.running=false;stopTimer();setRunning(false);q('feedLive').hidden=true;q('btnStop').hidden=true;addLog('Cancelled.','inf');G.skipSavePrompt=false;}
 function stopTask(){G.aborted=true;resolvePlan(false);resolveConf(false);resolveDelModal(false);}
 function openSsModal(title,src){q('ssMtitle').textContent=title;q('ssMimg').src=src;q('ssModal').classList.add('on');}
 function mkEmpty(icon,text){var e=document.createElement('div');e.className='empty';var ei=document.createElement('div');ei.className='empty-i';ei.textContent=icon;var et=document.createElement('div');et.className='empty-t';et.textContent=text;e.appendChild(ei);e.appendChild(et);return e;}
@@ -617,15 +904,25 @@ function showDel(title,desc){return new Promise(function(resolve){G.delResolve=r
 function resolveDelModal(yes){q('delModal').classList.remove('on');if(G.delResolve){G.delResolve(yes);G.delResolve=null;}}
 
 // ── SAVE MODAL ────────────────────────────────────────────────────────────────
-function saveWorkflow(){G.savingRecording=false;q('saveModalTitle').textContent='Save Workflow';q('saveModalInp').value=q('taskInput').value.trim().slice(0,50)||'Untitled workflow';q('saveModal').classList.add('on');setTimeout(function(){q('saveModalInp').focus();q('saveModalInp').select();},50);}
+function promptSaveWorkflow(){
+  G.savingRecording=false;
+  q('saveModalTitle').textContent='Save this as a workflow?';
+  q('saveModalDesc').textContent='Give it a name to re-run this task anytime from the Flows tab.';
+  q('saveModalInp').value=q('taskInput').value.trim().slice(0,50)||'Untitled workflow';
+  q('saveModal').classList.add('on');
+  setTimeout(function(){q('saveModalInp').focus();q('saveModalInp').select();},50);
+}
 function doSaveModal(){
   var name=q('saveModalInp').value.trim()||'Untitled';
   q('saveModal').classList.remove('on');
   if(G.savingRecording){saveRecording(name);G.savingRecording=false;return;}
-  var wf={id:Date.now(),name:name,task:q('taskInput').value.trim(),plan:G.plan,steps:G.plan?G.plan.length:0,createdAt:new Date().toISOString(),runs:1};
-  G.workflows.unshift(wf);chrome.storage.local.set({workflows:G.workflows});
+  // Carry the run's screenshots along too (capped like recordings) so a
+  // saved Flow can generate its own PDF/DOCX later, not just replay the task.
+  var wf={id:Date.now(),name:name,task:q('taskInput').value.trim(),plan:G.plan,shots:(G.shots||[]).slice(0,15),steps:G.plan?G.plan.length:0,createdAt:new Date().toISOString(),runs:1};
+  G.workflows.unshift(wf);
+  if(G.workflows.length>20) G.workflows.length=20;
+  saveLocal({workflows:G.workflows});
   addLog('\uD83D\uDCBE Saved "'+name+'"','done');renderWorkflows();
-  var btn=q('btnSaveWf');btn.textContent='\u2713';setTimeout(function(){btn.textContent='\uD83D\uDCBE';},1400);
 }
 
 // ── WORKFLOWS ─────────────────────────────────────────────────────────────────
@@ -640,17 +937,19 @@ function renderWfItems(filter){
     var info=document.createElement('div');info.className='wf-info';
     var nm=document.createElement('div');nm.className='wf-name';nm.textContent=wf.name;
     var mt=document.createElement('div');mt.className='wf-meta';mt.textContent=(wf.steps||'?')+' steps \u00B7 '+new Date(wf.createdAt).toLocaleDateString()+' \u00B7 '+(wf.runs||1)+'\u00D7';
-    info.appendChild(nm);info.appendChild(mt);info.addEventListener('click',function(){replayWf(wf.id);});
+    info.appendChild(nm);info.appendChild(mt);info.title='Click to run this task again';info.addEventListener('click',function(){replayWf(wf.id);});
     var btns=document.createElement('div');btns.className='wf-btns';
-    function mkB(txt,cls,fn){var b=document.createElement('button');b.className='wf-btn'+(cls?' '+cls:'');b.textContent=txt;b.addEventListener('click',function(e){e.stopPropagation();fn();});return b;}
-    btns.appendChild(mkB('\u25B6','',function(){replayWf(wf.id);}));
-    btns.appendChild(mkB('\u2193','',function(){exportWf(wf.id);}));
-    btns.appendChild(mkB('\u2715','del',function(){G.workflows=G.workflows.filter(function(w){return w.id!==wf.id;});chrome.storage.local.set({workflows:G.workflows});renderWfItems(q('wfSearch').value);}));
+    function mkB(txt,cls,title,fn){var b=document.createElement('button');b.className='wf-btn'+(cls?' '+cls:'');b.textContent=txt;b.title=title;b.addEventListener('click',function(e){e.stopPropagation();fn();});return b;}
+    btns.appendChild(mkB('\u25B6','play','Run this task again',function(){replayWf(wf.id);}));
+    btns.appendChild(mkB('\uD83D\uDCC4','doc','Generate a PDF or Word document with screenshots',function(){
+      if(!wf.shots||!wf.shots.length){addLog('This Flow has no saved screenshots yet \u2014 run it again to capture some, then it\u2019ll be available here.','inf');return;}
+      openDocModal(LPDoc.fromRun(wf.task,wf.plan,wf.shots));
+    }));
+    btns.appendChild(mkB('\u2715','del','Delete this workflow',function(){G.workflows=G.workflows.filter(function(w){return w.id!==wf.id;});saveLocal({workflows:G.workflows});renderWfItems(q('wfSearch').value);}));
     item.appendChild(ico);item.appendChild(info);item.appendChild(btns);c.appendChild(item);
   });
 }
-function replayWf(id){var wf=G.workflows.find(function(w){return w.id===id;});if(!wf)return;wf.runs=(wf.runs||1)+1;chrome.storage.local.set({workflows:G.workflows});q('taskInput').value=wf.task;switchPane('agent',q('navAgent'));detectVars();startTask();}
-function exportWf(id){var wf=G.workflows.find(function(w){return w.id===id;});if(!wf)return;var blob=new Blob([JSON.stringify(wf,null,2)],{type:'application/json'});var url=URL.createObjectURL(blob);var a=document.createElement('a');a.href=url;a.download='livepilot-'+wf.name.replace(/\s+/g,'-')+'.json';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);}
+function replayWf(id){var wf=G.workflows.find(function(w){return w.id===id;});if(!wf)return;wf.runs=(wf.runs||1)+1;saveLocal({workflows:G.workflows});q('taskInput').value=wf.task;switchPane('agent',q('navAgent'));detectVars();G.skipSavePrompt=true;startTask();}
 
 // ── SETTINGS ──────────────────────────────────────────────────────────────────
 function applyToggles(){document.querySelectorAll('.tog[data-key]').forEach(function(t){t.classList.toggle('on',G.settings[t.dataset.key]!==false);});}

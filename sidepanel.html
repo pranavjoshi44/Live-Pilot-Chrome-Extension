@@ -114,8 +114,15 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 .tip:hover .tip-label{opacity:1}
 .btn-icon{width:34px;height:34px;background:var(--surf);color:var(--txt2);border:1.5px solid var(--bdr);border-radius:var(--r);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
 .btn-icon:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-lt)}
-.btn-icon.rec-on{border-color:var(--rec);color:var(--rec);background:var(--rec-lt);animation:recpulse 1.5s infinite}
 .btn-icon.clr:hover{border-color:var(--err);color:var(--err);background:var(--err-lt)}
+
+/* Record button — always clearly labeled and red-tinted, not just an icon
+   you have to hover to identify; pulses harder once actually recording. */
+.btn-rec{flex-shrink:0;padding:9px 13px;background:var(--rec-lt);color:var(--rec);border:1.5px solid rgba(225,29,72,.4);border-radius:var(--r);font-family:var(--f);font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;transition:all .2s}
+.btn-rec:hover{background:rgba(225,29,72,.2);border-color:var(--rec)}
+.btn-rec .rec-ico{font-size:13px}
+.btn-rec.rec-on{background:var(--rec);color:#fff;border-color:var(--rec);box-shadow:0 2px 6px rgba(225,29,72,.4);animation:recpulse-btn 1.3s infinite}
+@keyframes recpulse-btn{0%,100%{box-shadow:0 0 0 0 rgba(225,29,72,.55)}70%{box-shadow:0 0 0 7px rgba(225,29,72,0)}}
 
 /* ── PLAN ───────────────────────────────────────────── */
 .plan-box{display:none;margin:8px 12px 0;background:var(--surf);border:1.5px solid rgba(91,82,232,.25);border-radius:var(--r);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.07)}
@@ -191,7 +198,17 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 .wf-btns{display:flex;gap:3px;flex-shrink:0;margin-left:6px}
 .wf-btn{width:23px;height:23px;background:var(--surf2);border:1px solid var(--bdr);border-radius:5px;color:var(--mut);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .2s}
 .wf-btn:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-lt)}
-.wf-btn.del:hover{border-color:var(--err);color:var(--err);background:var(--err-lt)}
+/* Color-coded by what they do, not just on hover — at icon-only size and
+   23x23px, a hover-only tint means you have to try a button to learn what
+   it is, which defeats the point. */
+.wf-btn.play{border-color:rgba(22,163,74,.35);color:var(--ok);background:var(--ok-lt)}
+.wf-btn.play:hover{background:rgba(22,163,74,.2)}
+.wf-btn.edit{border-color:rgba(217,119,6,.35);color:var(--warn);background:var(--warn-lt)}
+.wf-btn.edit:hover{background:rgba(217,119,6,.2)}
+.wf-btn.doc{border-color:rgba(91,82,232,.35);color:var(--acc);background:var(--acc-lt)}
+.wf-btn.doc:hover{background:rgba(91,82,232,.2)}
+.wf-btn.del{border-color:rgba(220,38,38,.35);color:var(--err);background:var(--err-lt)}
+.wf-btn.del:hover{background:rgba(220,38,38,.2)}
 
 /* ── RECORDINGS ─────────────────────────────────────── */
 .rec-pane{padding:8px 12px;flex:1;overflow-y:auto}
@@ -216,6 +233,27 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 .rtl-tgt{flex:1;font-size:9px;color:var(--txt2);font-family:var(--m);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rtl-ss{width:32px;height:22px;border-radius:3px;overflow:hidden;flex-shrink:0;border:1px solid var(--bdr);cursor:pointer;background:var(--bdr)}
 .rtl-ss img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* ── EDIT RECORDING OVERLAY ────────────────────────────── */
+.edit-rec-ov{display:none;position:fixed;inset:0;z-index:50;background:var(--bg);flex-direction:column}
+.edit-rec-ov.on{display:flex}
+.edit-rec-hd{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--bdr);background:var(--surf);flex-shrink:0}
+.edit-rec-back{width:28px;height:28px;background:var(--surf2);border:1px solid var(--bdr);border-radius:7px;cursor:pointer;font-size:13px;color:var(--txt2);flex-shrink:0}
+.edit-rec-ttl{flex:1;font-size:12px;font-weight:700;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.edit-rec-list{flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.edit-rec-add{margin:0 12px 12px;padding:9px;background:var(--acc-lt);color:var(--acc);border:1px dashed rgba(91,82,232,.4);border-radius:var(--r);font-family:var(--f);font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0}
+.edit-step{display:flex;gap:8px;padding:9px;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r)}
+.edit-step-thumb{width:54px;height:38px;border-radius:5px;overflow:hidden;flex-shrink:0;border:1px solid var(--bdr);background:var(--surf2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--mut)}
+.edit-step-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.edit-step-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+.edit-step-badge{font-size:8px;color:var(--mut);font-family:var(--m);text-transform:uppercase;font-weight:700}
+.edit-step-txt{width:100%;border:1.5px solid var(--bdr);border-radius:6px;padding:5px 7px;font-family:var(--f);font-size:11px;color:var(--txt);resize:none;outline:none;background:var(--bg)}
+.edit-step-txt:focus{border-color:var(--acc)}
+.edit-step-acts{display:flex;flex-direction:column;gap:4px;align-self:flex-start}
+.edit-step-btn{width:22px;height:22px;background:var(--surf2);border:1px solid var(--bdr);border-radius:5px;cursor:pointer;font-size:10px;color:var(--mut);display:flex;align-items:center;justify-content:center}
+.edit-step-btn:hover{border-color:var(--acc);color:var(--acc);background:var(--acc-lt)}
+.edit-step-btn.del{border-color:rgba(220,38,38,.35);color:var(--err);background:var(--err-lt)}
+.edit-step-btn.del:hover{background:rgba(220,38,38,.2)}
 .play-ctrl{border-top:1px solid var(--bdr);padding:7px 10px;background:var(--surf)}
 .iter-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:10px;color:var(--txt2)}
 .iter-inp{width:44px;background:var(--surf2);border:1.5px solid var(--bdr);border-radius:5px;padding:3px 6px;color:var(--txt);font-family:var(--m);font-size:10px;outline:none;text-align:center}
@@ -251,6 +289,11 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 .mdl-sel{background:var(--bg);border:1.5px solid var(--bdr);border-radius:5px;color:var(--txt);font-family:var(--f);font-size:10px;padding:4px 7px;outline:none;cursor:pointer}
 .mdl-sel:focus{border-color:var(--acc)}
 .btn-dng{padding:4px 9px;background:var(--err-lt);border:1px solid rgba(220,38,38,.25);color:var(--err);border-radius:5px;font-size:10px;cursor:pointer;font-family:var(--f);font-weight:600}
+.conf-box{display:flex;flex-direction:column;gap:7px;padding:10px;background:var(--surf);border:1px solid var(--bdr);border-radius:var(--r);margin-bottom:5px}
+.conf-lbl{font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;font-weight:600;display:block}
+.conf-status{font-size:10px}
+.conf-status.ok{color:var(--ok)}
+.conf-status.err{color:var(--err)}
 .vars-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:4px}
 .var-field{display:flex;flex-direction:column;gap:2px}
 .var-label{font-size:9px;color:var(--acc);font-family:var(--m);font-weight:600}
@@ -290,6 +333,14 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 
 /* Save modal */
 .save-modal .m-box{max-width:290px}
+
+/* Generate Document modal */
+.doc-modal .m-box{max-width:300px}
+.doc-dsc{font-size:10.5px;color:var(--mut);line-height:1.5;margin-bottom:11px}
+.doc-opt{width:100%;padding:10px 11px;margin-bottom:7px;background:var(--acc-lt);border:1px solid rgba(91,82,232,.25);border-radius:9px;color:var(--acc);font-family:var(--f);font-size:12px;font-weight:700;cursor:pointer;text-align:left;display:flex;align-items:center;gap:9px;transition:all .15s}
+.doc-opt:hover{background:var(--acc);color:#fff}
+.doc-opt:disabled{opacity:.55;cursor:default;pointer-events:none}
+.doc-opt-ic{font-size:15px}
 
 /* Delete confirm */
 .del-box{border-color:var(--err)!important}
@@ -372,14 +423,10 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
       <span id="runLbl">Run Task</span>
       <span class="kbd-hint">&#8984;&#8629;</span>
     </button>
-    <div class="tip">
-      <button class="btn-icon" id="btnRecord">&#9210;</button>
-      <span class="tip-label">Record browser session</span>
-    </div>
-    <div class="tip">
-      <button class="btn-icon" id="btnSaveWf">&#128190;</button>
-      <span class="tip-label">Save as workflow</span>
-    </div>
+    <button class="btn-rec" id="btnRecord">
+      <span class="rec-ico" id="recIco">&#9210;</span>
+      <span id="recLbl">Record</span>
+    </button>
     <div class="tip">
       <button class="btn-icon clr" id="btnClearTask">&#10005;</button>
       <span class="tip-label">Clear task &amp; log</span>
@@ -414,6 +461,7 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
     <div class="result-hd">
       <div class="result-title">&#9989; Results <span id="resultCount" style="font-size:9px;color:var(--mut);font-weight:400"></span></div>
       <div class="result-acts">
+        <button class="btn-export" id="btnGenDoc">&#128196; Doc</button>
         <button class="btn-export" id="btnExportCSV">CSV</button>
         <button class="btn-export" id="btnExportTxt">Text</button>
         <button class="btn-export" id="btnCopyResult">Copy</button>
@@ -473,6 +521,33 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
       <div class="var-field"><div class="var-label">{{company}}</div><input class="var-inp" data-var="company" placeholder="Company"></div>
       <div class="var-field"><div class="var-label">{{phone}}</div><input class="var-inp" data-var="phone" placeholder="+1 555..."></div>
     </div>
+    <div class="set-section" style="margin-top:10px">Confluence</div>
+    <div class="conf-box">
+      <select class="mdl-sel" id="confType">
+        <option value="cloud">Cloud (yoursite.atlassian.net)</option>
+        <option value="server">Server / Data Center</option>
+      </select>
+      <div>
+        <label class="conf-lbl" for="confUrl">Site URL</label>
+        <input class="api-inp" id="confUrl" placeholder="https://yoursite.atlassian.net" style="width:100%">
+      </div>
+      <div id="confEmailRow">
+        <label class="conf-lbl" for="confEmail">Email</label>
+        <input class="api-inp" id="confEmail" placeholder="you@company.com" style="width:100%">
+      </div>
+      <div>
+        <label class="conf-lbl" for="confToken" id="confTokenLbl">API Token</label>
+        <input type="password" class="api-inp" id="confToken" placeholder="" autocomplete="off" style="width:100%">
+      </div>
+      <div>
+        <label class="conf-lbl" for="confSpace">Space Key</label>
+        <input class="api-inp" id="confSpace" placeholder="e.g. ENG" style="width:100%">
+      </div>
+      <div style="display:flex;align-items:center;gap:9px">
+        <button class="btn-pri" id="btnConfSave">Save</button>
+        <span class="conf-status" id="confStatus"></span>
+      </div>
+    </div>
     <div class="set-section" style="margin-top:10px">Data</div>
     <div class="s-row"><div><div class="s-lbl">Clear All Data</div><div class="s-dsc">Remove all data</div></div><button class="btn-dng" id="btnClear">Clear</button></div>
   </div>
@@ -488,6 +563,17 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
   <button class="nav-btn"    id="navSettings"   data-pane="settings">   <span class="nav-i">⚙️</span>Settings</button>
 </div>
 
+<!-- EDIT RECORDING OVERLAY -->
+<div class="edit-rec-ov" id="editRecOv">
+  <div class="edit-rec-hd">
+    <button class="edit-rec-back" id="btnEditRecBack" title="Discard and go back">&#8592;</button>
+    <div class="edit-rec-ttl" id="editRecTitle">Edit Recording</div>
+    <button class="btn-pri" id="btnEditRecSave" title="Save changes to this recording">Save</button>
+  </div>
+  <div class="edit-rec-list" id="editRecList"></div>
+  <button class="edit-rec-add" id="btnEditRecAdd" title="Insert a manual step with your own text">&#43; Add Step</button>
+</div>
+
 <!-- SCREENSHOT MODAL -->
 <div class="m-ov" id="ssModal"><div class="m-box"><div class="m-ttl" id="ssMtitle">Screenshot</div><img class="m-img" id="ssMimg" src="" alt=""><button class="m-cls" id="btnCloseSS">Close</button></div></div>
 <!-- CONFIRM MODAL -->
@@ -495,11 +581,24 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 <!-- VAR MODAL -->
 <div class="v-ov" id="varModal"><div class="v-box"><div class="v-ttl">Fill Variable</div><div class="v-dsc">Enter a value for this placeholder.</div><div class="v-field"><label id="varModalLabel">{{var}}</label><input type="text" class="v-inp" id="varModalInp" placeholder="Enter value…"></div><div class="v-acts"><button class="btn-ok" id="btnVarOk" style="flex:1;padding:7px">Use</button><button class="c-no" id="btnVarSkip" style="flex:1">Skip</button></div></div></div>
 <!-- SAVE MODAL -->
-<div class="m-ov save-modal" id="saveModal"><div class="m-box"><div class="m-ttl" id="saveModalTitle">Save Workflow</div><label style="font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;font-weight:600;margin-bottom:5px;display:block">Name</label><input type="text" class="api-inp" id="saveModalInp" placeholder="e.g. Daily price check" style="width:100%;margin-bottom:10px"><div style="display:flex;gap:7px"><button class="btn-ok" id="btnSaveModalOk" style="flex:1;padding:8px">Save</button><button class="m-cls" id="btnSaveModalCancel" style="flex:1;padding:8px">Cancel</button></div></div></div>
+<div class="m-ov save-modal" id="saveModal"><div class="m-box"><div class="m-ttl" id="saveModalTitle">Save Workflow</div><div class="doc-dsc" id="saveModalDesc"></div><label style="font-size:9px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px;font-weight:600;margin-bottom:5px;display:block">Name</label><input type="text" class="api-inp" id="saveModalInp" placeholder="e.g. Daily price check" style="width:100%;margin-bottom:10px"><div style="display:flex;gap:7px"><button class="btn-ok" id="btnSaveModalOk" style="flex:1;padding:8px">Save</button><button class="m-cls" id="btnSaveModalCancel" style="flex:1;padding:8px">Cancel</button></div></div></div>
 <!-- DELETE CONFIRM -->
 <div class="c-ov" id="delModal"><div class="c-box del-box"><div class="c-ico">🗑️</div><div class="c-ttl" id="delModalTitle">Delete?</div><div class="c-dsc" id="delModalDesc">Cannot be undone.</div><div class="c-acts"><button class="c-yes" id="btnDelYes" style="background:var(--err)">Delete</button><button class="c-no" id="btnDelNo">Cancel</button></div></div></div>
+<!-- GENERATE DOCUMENT MODAL -->
+<div class="m-ov doc-modal" id="docModal"><div class="m-box">
+  <div class="m-ttl" id="docModalTitle">Generate Document</div>
+  <div class="doc-dsc">Export this as a detailed step-by-step guide with highlighted screenshots.</div>
+  <button class="doc-opt" id="btnDocPdf"><span class="doc-opt-ic">&#128196;</span><span>Download PDF</span></button>
+  <button class="doc-opt" id="btnDocWord"><span class="doc-opt-ic">&#128221;</span><span>Download Word (.docx)</span></button>
+  <button class="doc-opt" id="btnDocGoogle" title="Downloads the .docx, then opens Google Drive so you can drag it in"><span class="doc-opt-ic">&#128194;</span><span>Open in Google Docs</span></button>
+  <button class="doc-opt" id="btnDocConfluence" title="Creates a page with the screenshots attached, in the space configured in Settings"><span class="doc-opt-ic">&#128221;</span><span>Publish to Confluence</span></button>
+  <button class="m-cls" id="btnDocCancel">Cancel</button>
+</div></div>
 
 <input type="hidden" id="wfName" value="">
+<script src="lib/jspdf.umd.min.js"></script>
+<script src="lib/docx.umd.js"></script>
+<script src="docgen.js"></script>
 <script src="sidepanel.js"></script>
 </body>
 </html>

@@ -27,16 +27,113 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
     return false;
   }
 
-  // Screenshot capture (called by side panel, captured from background)
+  // Screenshot capture (called by the side panel, and directly by content.js
+  // right after drawing a click marker, so it can await the actual bytes
+  // before performing the click/type — see CAPTURE_SCREENSHOT in content.js).
+  // When the request comes from a content script, target that tab's own
+  // window explicitly rather than "whatever window/tab is currently
+  // focused" — otherwise a stray click on another tab (DevTools, this very
+  // side panel's window, etc.) mid-recording captures the wrong page, or
+  // fails outright with "Cannot access a chrome:// URL".
   if (msg.type === 'CAPTURE_SCREENSHOT') {
-    chrome.tabs.captureVisibleTab(null, { format: 'jpeg', quality: 45 }, function(url) {
-      if (chrome.runtime.lastError) sendResponse({ error: chrome.runtime.lastError.message });
-      else sendResponse({ url: url });
+    var windowId = (sender && sender.tab) ? sender.tab.windowId : null;
+    chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 60 }, function(url) {
+      if (chrome.runtime.lastError) { sendResponse({ error: chrome.runtime.lastError.message }); return; }
+      // Captured at full (often retina, 2x+) display resolution — way more
+      // pixels than any document or thumbnail needs, and the dominant reason
+      // a handful of recordings can blow past chrome.storage.local's quota.
+      // Downscale before it ever reaches storage.
+      downscale(url, 1280).then(function(small){ sendResponse({ url: small }); });
     });
+    return true; // async
+  }
+
+  // Publish a generated guide to Confluence: create the page, then upload
+  // each screenshot as an attachment. The page body (built in docgen.js)
+  // already references those attachments by filename via <ac:image> macros —
+  // Confluence resolves that reference by filename whenever the page is
+  // *viewed*, not at save time, so there's no need to create the page, then
+  // come back and patch its body once the attachments exist.
+  if (msg.type === 'CONFLUENCE_PUBLISH') {
+    publishToConfluence(msg.config, msg.doc)
+      .then(function(result){ sendResponse({ ok: true, url: result.url }); })
+      .catch(function(e){ sendResponse({ error: e.message }); });
     return true; // async
   }
 
   return false;
 });
+
+function publishToConfluence(config, doc) {
+  var isCloud = config.type === 'cloud';
+  var base = config.baseUrl + (isCloud ? '/wiki/rest/api' : '/rest/api');
+  var authHeader = isCloud
+    ? 'Basic ' + btoa(config.email + ':' + config.token)
+    : 'Bearer ' + config.token;
+
+  function apiJson(path, method, bodyObj) {
+    return fetch(base + path, {
+      method: method,
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+      body: bodyObj ? JSON.stringify(bodyObj) : undefined
+    }).then(function(res){
+      if (!res.ok) {
+        return res.text().then(function(t){
+          throw new Error('Confluence ' + res.status + ': ' + (t || res.statusText).slice(0, 300));
+        });
+      }
+      return res.json();
+    });
+  }
+
+  return apiJson('/content', 'POST', {
+    type: 'page',
+    title: doc.title,
+    space: { key: config.spaceKey },
+    body: { storage: { value: doc.html, representation: 'storage' } }
+  }).then(function(page){
+    var uploads = doc.images.reduce(function(chain, img){
+      return chain.then(function(){
+        var form = new FormData();
+        form.append('file', new Blob([img.bytes], { type: 'image/jpeg' }), img.filename);
+        return fetch(base + '/content/' + page.id + '/child/attachment', {
+          method: 'POST',
+          headers: { 'Authorization': authHeader, 'X-Atlassian-Token': 'nocheck' },
+          body: form
+        }).then(function(res){
+          if (!res.ok) throw new Error('Attachment "' + img.filename + '" failed to upload (' + res.status + ')');
+        });
+      });
+    }, Promise.resolve());
+
+    return uploads.then(function(){
+      var webui = page._links && page._links.webui;
+      var siteBase = (page._links && page._links.base) || config.baseUrl;
+      return { url: webui ? siteBase + webui : config.baseUrl };
+    });
+  });
+}
+
+function downscale(dataUrl, maxW) {
+  return fetch(dataUrl).then(function(r){ return r.blob(); })
+    .then(function(blob){ return createImageBitmap(blob); })
+    .then(function(bitmap){
+      if (bitmap.width <= maxW) { bitmap.close(); return dataUrl; }
+      var scale = maxW / bitmap.width;
+      var w = maxW, h = Math.round(bitmap.height * scale);
+      var canvas = new OffscreenCanvas(w, h);
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(bitmap, 0, 0, w, h);
+      bitmap.close();
+      return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 }).then(function(outBlob){
+        return outBlob.arrayBuffer();
+      }).then(function(buf){
+        var bytes = new Uint8Array(buf), binary = '';
+        for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return 'data:image/jpeg;base64,' + btoa(binary);
+      });
+    })
+    .catch(function(){ return dataUrl; }); // resizing is an optimization, not a requirement — never let it block the capture
+}
 
 // Tab tracking removed — injection is on-demand only (avoids excessive script injection)

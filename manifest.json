@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LivePilot- Free AI Browser Automation Agent",
-  "version": "1.5.0",
+  "version": "2.0.0",
   "description": "AI browser automation agent \u2014 automate tasks, record sessions, extract data with self-healing selectors",
   "icons": {
     "16": "icons/icon16.png",
@@ -51,6 +51,7 @@
     "activeTab",
     "tabs",
     "storage",
+    "unlimitedStorage",
     "scripting",
     "sidePanel"
   ],
