@@ -27,24 +27,37 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
     return false;
   }
 
-  // Screenshot capture (called by the side panel, and directly by content.js
-  // right after drawing a click marker, so it can await the actual bytes
-  // before performing the click/type — see CAPTURE_SCREENSHOT in content.js).
-  // When the request comes from a content script, target that tab's own
-  // window explicitly rather than "whatever window/tab is currently
-  // focused" — otherwise a stray click on another tab (DevTools, this very
-  // side panel's window, etc.) mid-recording captures the wrong page, or
-  // fails outright with "Cannot access a chrome:// URL".
+  // Screenshot capture (called directly by content.js right after drawing a
+  // click marker, and by the side panel itself for steps that don't draw one
+  // — navigate/extract/etc, or the recorder's "no marker yet" fallback).
+  // Always resolve a specific window rather than "whatever's currently
+  // focused": a content-script sender already carries its own tab, but a
+  // side-panel sender doesn't (extension pages aren't tied to a tab), and
+  // without this, those calls silently fell back to the focused window —
+  // capturing the wrong tab (or failing outright with "Cannot access a
+  // chrome:// URL") the moment that focus wasn't the tab being recorded.
+  // The one exception: a caller can omit tabId on purpose to mean "whatever
+  // I'm looking at right now" (e.g. the editor's manual "capture this tab"
+  // button), so only resolve a tabId when one was actually given.
   if (msg.type === 'CAPTURE_SCREENSHOT') {
-    var windowId = (sender && sender.tab) ? sender.tab.windowId : null;
-    chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 60 }, function(url) {
-      if (chrome.runtime.lastError) { sendResponse({ error: chrome.runtime.lastError.message }); return; }
-      // Captured at full (often retina, 2x+) display resolution — way more
-      // pixels than any document or thumbnail needs, and the dominant reason
-      // a handful of recordings can blow past chrome.storage.local's quota.
-      // Downscale before it ever reaches storage.
-      downscale(url, 1280).then(function(small){ sendResponse({ url: small }); });
-    });
+    var capture = function(windowId){
+      chrome.tabs.captureVisibleTab(windowId, { format: 'jpeg', quality: 60 }, function(url) {
+        if (chrome.runtime.lastError) { sendResponse({ error: chrome.runtime.lastError.message }); return; }
+        // Captured at full (often retina, 2x+) display resolution — way more
+        // pixels than any document or thumbnail needs, and the dominant reason
+        // a handful of recordings can blow past chrome.storage.local's quota.
+        // Downscale before it ever reaches storage.
+        downscale(url, 1280).then(function(small){ sendResponse({ url: small }); });
+      });
+    };
+    if (msg.tabId) {
+      chrome.tabs.get(msg.tabId, function(tab) {
+        if (chrome.runtime.lastError || !tab) { sendResponse({ error: chrome.runtime.lastError ? chrome.runtime.lastError.message : 'Tab not found' }); return; }
+        capture(tab.windowId);
+      });
+    } else {
+      capture((sender && sender.tab) ? sender.tab.windowId : null);
+    }
     return true; // async
   }
 

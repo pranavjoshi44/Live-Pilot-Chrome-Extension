@@ -283,8 +283,9 @@ chrome.runtime.onMessage.addListener(function(msg) {
   // shows a leftover click marker or a half-loaded page. Written by index
   // since a slow capture must not land out of order against a faster later one.
   var recAtCapture = G.currentRecording;
-  waitForPageQuiet(G.currentTabId).then(function(){
-    chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'}, function(r){
+  var captureTabId = G.currentTabId;
+  waitForPageQuiet(captureTabId).then(function(){
+    chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT', tabId:captureTabId}, function(r){
       if (chrome.runtime.lastError) return;
       if (r && r.url && recAtCapture) recAtCapture.screenshots[actionIndex] = r.url;
     });
@@ -335,11 +336,14 @@ function stopRecording(){
 function saveRecording(name){
   G.currentRecording.name=name||G.currentRecording.name;
   var rec=Object.assign({},G.currentRecording);
-  rec.screenshots=rec.screenshots.slice(0,15);
+  // Used to cap rec.screenshots at 15 without capping rec.actions to match \u2014
+  // any recording past 15 steps then had more actions than screenshots, so
+  // every later step's screenshot[i] silently pointed at the wrong action
+  // (or nothing, for the last ones). Screenshots are downscaled at capture
+  // time now and storage has unlimitedStorage, so the per-recording cap on
+  // *recordings* below is the real defense \u2014 actions and screenshots just
+  // stay the same length, always.
   G.recordings.unshift(rec);
-  // Each recording can carry up to 15 screenshots \u2014 with no cap on count,
-  // chrome.storage.local's quota (10MB, even with unlimitedStorage there's
-  // no reason to hoard them) gets a lot closer a lot faster than it looks.
   if(G.recordings.length>20) G.recordings.length=20;
   saveLocal({recordings:G.recordings});
   G.currentRecording=null;
@@ -708,7 +712,7 @@ function buildCtx(snap){
 }
 
 function generatePlan(task,ctx){
-  var sys=['You are LivePilot, a browser automation AI. Return ONLY a raw JSON array, no markdown, no fences.','Each item: step(int), action(navigate|click|type|press_enter|scroll|extract|wait|get_text|get_url), description(str), target(str), value(str), sensitive(bool)','Rules: navigate=full https URL; after navigate add wait 2000; after type in search add press_enter; use selectors from PAGE CONTEXT; for extract use CSS selectors that match multiple items.',ctx||''].join('\n');
+  var sys=['You are LivePilot, a browser automation AI. Return ONLY a raw JSON array, no markdown, no fences.','Each item: step(int), action(navigate|click|type|press_enter|scroll|extract|wait|get_text|get_url), description(str), target(str), value(str), sensitive(bool)','Rules: navigate=full https URL; after navigate add wait 2000; after type in search add press_enter; use selectors from PAGE CONTEXT; for extract use CSS selectors that match multiple items; description is a short imperative instruction like "Click the search button", not past tense like "Clicked the search button".',ctx||''].join('\n');
   return groq(sys,task).then(function(raw){
     if(!raw) return null;
     try{var clean=raw.replace(/```json|```/gi,'').trim();var m=clean.match(/\[[\s\S]*\]/);if(!m)throw new Error('No array');var plan=JSON.parse(m[0]);if(!Array.isArray(plan)||!plan.length)throw new Error('Empty');plan.forEach(function(s){if(s.target===undefined)s.target='';if(s.value===undefined)s.value='';if(s.sensitive===undefined)s.sensitive=false;});return plan;}
@@ -740,7 +744,15 @@ function execStep(task,plan,tabId,i,step){
     if(r&&r.error){
       addLog('\u2717 '+r.error,'err');
       healStep(tabId,step,r.error,task).then(function(h){
-        if(h&&!h.error){addLog('\u2713 Healed','heal');accumulateData(h);}
+        if(h&&!h.error){
+          addLog('\u2713 Healed','heal');accumulateData(h);
+          // The healed retry re-runs the same click/type — its own pre-action
+          // screenshot is the correct one for this step (the original attempt
+          // never got far enough to capture one). Without this, the slot for
+          // this step stays empty, which previously could misalign every
+          // later step's screenshot when matched up against the document.
+          if(h.screenshot){G.shots[i]={step:i+1,url:h.screenshot};addThumb(h.screenshot,i+1);}
+        }
         else addLog('\u26A0 Heal failed','inf');
         afterStep(task,plan,tabId,i);
       });
@@ -778,7 +790,7 @@ function afterStep(task,plan,tabId,i){
     return;
   }
   waitForPageQuiet(tabId).then(function(){
-    chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'},function(r){
+    chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT', tabId:tabId},function(r){
       if(r&&r.url){G.shots[i]={step:i+1,url:r.url};addThumb(r.url,i+1);}
       runSteps(task,plan,tabId,i+1);
     });

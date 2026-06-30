@@ -3,26 +3,26 @@
 
 // ── CLICK MARKER (Scribehow-style red box + dot, baked into the live page so
 // chrome.tabs.captureVisibleTab rasterizes it as part of the screenshot) ──
-// Shared across the executor and recorder IIFEs below.
-if(!window.__lpMark){
+// Shared across the executor and recorder IIFEs below. Draws from a plain
+// rect object, not an element — the geometry gets computed synchronously at
+// the actual click/action moment (see __lpRectOf), then the marker itself is
+// drawn later once it's this action's turn in the capture queue, without
+// drifting from a re-queried, possibly-stale element position.
+if(!window.__lpDrawMarker){
   (function(){
     var markers=[];
     function clear(){ markers.forEach(function(n){ try{ n.remove(); }catch(_){} }); markers=[]; }
-    window.__lpMark=function(el,x,y,ttlMs){
+    window.__lpDrawMarker=function(rect,x,y,ttlMs){
       clear();
       ttlMs=ttlMs||1800; // comfortably outlast the ~280ms pre-action pause + screenshot round-trip; still clearly visible live
-      if(el){
-        var r;
-        try{ r=el.getBoundingClientRect(); }catch(_){ r=null; }
-        if(r&&(r.width||r.height)){
-          var box=document.createElement('div');
-          box.style.cssText='position:fixed;pointer-events:none;z-index:2147483647;'+
-            'left:'+(r.left-4)+'px;top:'+(r.top-4)+'px;width:'+(r.width+8)+'px;height:'+(r.height+8)+'px;'+
-            'border:3px solid #ff3b30;border-radius:6px;'+
-            'box-shadow:0 0 0 3px rgba(255,59,48,.22),0 0 14px rgba(255,59,48,.6);';
-          document.documentElement.appendChild(box);
-          markers.push(box);
-        }
+      if(rect&&(rect.width||rect.height)){
+        var box=document.createElement('div');
+        box.style.cssText='position:fixed;pointer-events:none;z-index:2147483647;'+
+          'left:'+(rect.left-4)+'px;top:'+(rect.top-4)+'px;width:'+(rect.width+8)+'px;height:'+(rect.height+8)+'px;'+
+          'border:3px solid #ff3b30;border-radius:6px;'+
+          'box-shadow:0 0 0 3px rgba(255,59,48,.22),0 0 14px rgba(255,59,48,.6);';
+        document.documentElement.appendChild(box);
+        markers.push(box);
       }
       if(typeof x==='number'&&typeof y==='number'){
         var dot=document.createElement('div');
@@ -34,6 +34,12 @@ if(!window.__lpMark){
       }
       setTimeout(clear,ttlMs);
     };
+    window.__lpRectOf=function(el){
+      if(!el) return null;
+      try{ var r=el.getBoundingClientRect(); return (r&&(r.width||r.height)) ? {left:r.left,top:r.top,width:r.width,height:r.height} : null; }catch(_){ return null; }
+    };
+    // Back-compat shim — only used to CLEAR (WAIT_QUIET calls this with no args).
+    window.__lpMark=function(el,x,y,ttlMs){ window.__lpDrawMarker(window.__lpRectOf(el),x,y,ttlMs); };
   })();
 }
 
@@ -49,23 +55,54 @@ if(!window.__lpMark){
 // failure mode used to leave this promise hanging forever, which silently
 // stalled every action recorded after it (the symptom: recording works for
 // the first click or two, then nothing else ever gets logged again).
-if(!window.__lpCapture){
-  window.__lpCapture=function(){
-    return new Promise(function(resolve){
-      var done=false;
-      function finish(v){ if(done) return; done=true; resolve(v); }
-      var now=Date.now();
-      if(now-(window.__lpLastCaptureAt||0) < 600){ finish(null); return; } // stay under the rate limit — skip the shot, never the action
-      window.__lpLastCaptureAt=now;
-      var to=setTimeout(function(){ finish(null); },1500); // hard ceiling — a stuck capture can't block recording
-      try{
-        chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'}, function(r){
-          clearTimeout(to);
-          if(chrome.runtime.lastError){ finish(null); return; }
-          finish(r&&r.url?r.url:null);
-        });
-      }catch(_){ clearTimeout(to); finish(null); }
+//
+// Marking and capturing are one atomic, queued step — not two independent
+// calls. They used to be separate: a marker was drawn immediately, then its
+// capture queued behind the rate limit. If a SECOND action's marker got
+// drawn while the FIRST action's capture was still waiting its turn, the
+// first capture ended up photographing the second marker instead of its
+// own — "Click A"'s screenshot showing "B" highlighted. Chaining the draw
+// and the capture through the same queue guarantees nothing can draw a
+// different marker in between.
+if(!window.__lpCaptureQueue){
+  window.__lpCaptureQueue=Promise.resolve();
+  window.__lpMarkAndCapture=function(el,x,y){
+    var rect=window.__lpRectOf(el); // computed NOW, before any queueing delay
+    var run=window.__lpCaptureQueue.then(function(){
+      return new Promise(function(resolveGate){
+        var sinceLast=Date.now()-(window.__lpLastCaptureAt||0);
+        if(sinceLast<550) setTimeout(resolveGate,550-sinceLast); else resolveGate();
+      });
+    }).then(function(){
+      window.__lpDrawMarker(rect,x,y);
+      window.__lpLastCaptureAt=Date.now();
+      return new Promise(function(resolve){
+        var done=false;
+        function finish(v){ if(done) return; done=true; resolve(v); }
+        var to=setTimeout(function(){ finish(null); },1500); // hard ceiling — a stuck capture can't block recording
+        try{
+          // Wait for two animation frames so the browser has time to paint
+          // the newly-inserted marker into the compositor before we ask
+          // the background to capture the visible tab. This reduces cases
+          // where the screenshot misses the highlight due to paint races.
+          requestAnimationFrame(function(){
+            requestAnimationFrame(function(){
+              try{
+                chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'}, function(r){
+                  clearTimeout(to);
+                  if(chrome.runtime.lastError){ finish(null); return; }
+                  finish(r&&r.url?r.url:null);
+                });
+              }catch(_){ clearTimeout(to); finish(null); }
+            });
+          });
+        }catch(_){ clearTimeout(to); finish(null); }
+      });
     });
+    // Keep the queue moving even if this capture failed — never let one bad
+    // link wedge every capture after it.
+    window.__lpCaptureQueue=run.catch(function(){});
+    return run;
   };
 }
 
@@ -88,8 +125,17 @@ if(!window.__lpCapture){
       case 'WAIT_QUIET':
         // This is always used to get a clean "page has settled" shot (navigate,
         // extract, etc.) — drop any leftover click marker so it can't bleed
-        // into a screenshot it has nothing to do with.
-        if(window.__lpMark) window.__lpMark();
+        // into a screenshot it has nothing to do with. Queued behind
+        // __lpCaptureQueue rather than cleared immediately: a click/type
+        // capture can still be mid-flight (marker drawn, waiting on the
+        // captureVisibleTab round trip) when this arrives — clearing right
+        // away would erase that marker before its own screenshot is taken,
+        // producing a clean-but-unhighlighted shot for that step.
+        if(window.__lpCaptureQueue){
+          window.__lpCaptureQueue = window.__lpCaptureQueue.then(function(){
+            if(window.__lpMark) window.__lpMark();
+          });
+        } else if(window.__lpMark) window.__lpMark();
         waitForQuiet(msg.maxMs||2500, msg.quietMs||500, msg.minMs||600).then(function(){ sendResponse({ok:true}); });
         return true;
       case 'TOGGLE_SIDEBAR': toggleSidebar(); sendResponse({ok:true}); break;
@@ -113,13 +159,13 @@ if(!window.__lpCapture){
     if(action==='click'){
       return waitForEl(target,6000).then(function(el){
         if(!el) return {error:'click: element not found — '+target};
-        scrollIntoView(el); highlight(el);
+        scrollIntoView(el);
         // Capture and WAIT for the actual screenshot bytes before touching
         // the element — a fire-and-forget "I'm about to click" signal isn't
         // enough, since the click can fire before that message even finishes
         // its round trip. Only once we're holding the captured image do we
         // know for certain the page still looks like it did pre-click.
-        return captureNow().then(function(shot){
+        return captureNow(el).then(function(shot){
           return wait(120).then(function(){ el.click(); return {success:true, screenshot:shot}; });
         });
       });
@@ -127,8 +173,8 @@ if(!window.__lpCapture){
     if(action==='type'){
       return waitForEl(target,6000).then(function(el){
         if(!el) return {error:'type: input not found — '+target};
-        scrollIntoView(el); highlight(el);
-        return captureNow().then(function(shot){
+        scrollIntoView(el);
+        return captureNow(el).then(function(shot){
           return wait(120).then(function(){
             el.focus();
             setNativeValue(el, value||'');
@@ -142,7 +188,8 @@ if(!window.__lpCapture){
     if(action==='press_enter'){
       return waitForEl(target,3000).then(function(el){
         var t=el||document.activeElement;
-        var shotP = t ? (scrollIntoView(t), highlight(t), captureNow()) : Promise.resolve(null);
+        if(t) scrollIntoView(t);
+        var shotP = captureNow(t);
         return shotP.then(function(shot){
           return wait(120).then(function(){
             if(t){
@@ -377,7 +424,7 @@ if(!window.__lpCapture){
 
   function wait(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 
-  function captureNow(){ return window.__lpCapture(); }
+  function captureNow(el,x,y){ return window.__lpMarkAndCapture(el,x,y); }
 
   function scrollIntoView(el){
     // Instant, not smooth — the highlight marker snapshots el's rect right after
@@ -387,8 +434,6 @@ if(!window.__lpCapture){
       try{ el.scrollIntoView(); }catch(__){}
     }
   }
-
-  function highlight(el,x,y,ttlMs){ window.__lpMark(el,x,y,ttlMs); }
 
   function getParentHref(el){
     var p=el;
@@ -579,14 +624,15 @@ if(!window.__lpCapture){
     var sel=bestSelector(el);
     if(!sel) return;
     var text=getDescText(el);
-    window.__lpMark(el,e.clientX,e.clientY);
     // The real click event has already fired by the time this resolves (it's
     // dispatched synchronously right after mouseup, before any async code of
     // ours can run) — there's no way to get strictly "before" for a human's
     // own click. Capturing as the very first thing we do, with no relay hop,
     // is the closest achievable: it's racing the click's own effects rather
-    // than something that waited for them to finish first.
-    window.__lpCapture().then(function(shot){
+    // than something that waited for them to finish first. Marking and
+    // capturing happen as one atomic queued step (see __lpMarkAndCapture) so
+    // a later click's marker can never overwrite this one before it's captured.
+    window.__lpMarkAndCapture(el,e.clientX,e.clientY).then(function(shot){
       lastInteractionAt=Date.now();
       emit({action:'click', target:sel, description:'Click: '+(text||sel), value:'', sensitive:false, screenshot:shot});
     });
@@ -602,8 +648,7 @@ if(!window.__lpCapture){
     lastInputEl=null;
     var sel=bestSelector(el);
     if(!sel) return Promise.resolve();
-    window.__lpMark(el);
-    return window.__lpCapture().then(function(shot){
+    return window.__lpMarkAndCapture(el).then(function(shot){
       lastInteractionAt=Date.now();
       emit({action:'type', target:sel, value:val, description:'Type "'+val.slice(0,40)+'" in '+sel, sensitive:sensitive, screenshot:shot});
     });
@@ -631,8 +676,7 @@ if(!window.__lpCapture){
         var el=e.target||document.activeElement;
         var sel=bestSelector(el);
         if(!sel) return;
-        window.__lpMark(el);
-        return window.__lpCapture().then(function(shot){
+        return window.__lpMarkAndCapture(el).then(function(shot){
           lastInteractionAt=Date.now();
           emit({action:'press_enter', target:sel, description:'Press Enter on '+sel, value:'', sensitive:false, screenshot:shot});
         });

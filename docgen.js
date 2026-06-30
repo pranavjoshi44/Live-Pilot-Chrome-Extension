@@ -4,10 +4,17 @@
 
 var LPDoc = (function(){
 
+  // Imperative/instructional mood ("Click X"), not past tense ("Clicked X") —
+  // the screenshot attached to a step is captured the instant *before* that
+  // step's action runs (so the highlight box is accurate), meaning a step's
+  // own image never shows that action's result, only the next step's does.
+  // Past tense reads as "this already happened, see below" right above an
+  // image that hasn't happened yet — imperative reads as an instruction to
+  // follow, which is exactly what the screenshot underneath it supports.
   var ACTION_LABELS = {
-    click:'Clicked an item', type:'Typed some text', press_enter:'Pressed Enter', navigate:'Opened a page',
-    extract:'Collected information from the page', wait:'Waited a moment', scroll:'Scrolled the page',
-    get_text:'Read text from the page', get_url:'Checked the page address', get_title:'Checked the page title'
+    click:'Click an item', type:'Type some text', press_enter:'Press Enter', navigate:'Open a page',
+    extract:'Collect information from the page', wait:'Wait a moment', scroll:'Scroll the page',
+    get_text:'Read text from the page', get_url:'Check the page address', get_title:'Check the page title'
   };
   function humanizeAction(a){ return ACTION_LABELS[a] || (a ? (a.charAt(0).toUpperCase()+a.slice(1)) : 'Step'); }
 
@@ -67,10 +74,10 @@ var LPDoc = (function(){
   function fallbackDescription(action,target,value){
     var field = friendlyFieldName(target);
     switch(action){
-      case 'click': return field ? ('Clicked the ' + field) : 'Clicked an item on the page';
-      case 'type': return value ? ('Typed "' + value + '"' + (field ? ' into the ' + field : '')) : ('Typed into ' + (field || 'a field'));
-      case 'press_enter': return 'Pressed Enter';
-      case 'navigate': return 'Opened ' + friendlyPageName(target);
+      case 'click': return field ? ('Click the ' + field) : 'Click the highlighted item';
+      case 'type': return value ? ('Type "' + value + '"' + (field ? ' into the ' + field : '')) : ('Type into ' + (field || 'the highlighted field'));
+      case 'press_enter': return 'Press Enter';
+      case 'navigate': return 'Open ' + friendlyPageName(target);
       default: return humanizeAction(action);
     }
   }
@@ -85,7 +92,7 @@ var LPDoc = (function(){
     if(a.edited || a.action === 'note') return a.description || '';
     if(a.action === 'click'){
       var suffix = (a.description||'').replace(/^Click:\s*/,'');
-      if(suffix && suffix !== a.target) return 'Clicked "' + suffix + '"'; // real visible button/link text
+      if(suffix && suffix !== a.target) return 'Click "' + suffix + '"'; // real visible button/link text
       return fallbackDescription('click', a.target, value);
     }
     return fallbackDescription(a.action, a.target, value);
@@ -117,7 +124,7 @@ var LPDoc = (function(){
     plan = plan || []; shots = shots || [];
     var steps = plan.map(function(s,i){
       var shot = null;
-      for(var j=0;j<shots.length;j++){ if(shots[j].step === i+1){ shot = shots[j].url; break; } }
+      for(var j=0;j<shots.length;j++){ if(shots[j] && shots[j].step === i+1){ shot = shots[j].url; break; } }
       var value = s.sensitive ? '••••••' : (s.value || '');
       // Navigate descriptions always just restate the raw URL (the planner
       // is told to), so prefer our friendlier version over it; other actions
