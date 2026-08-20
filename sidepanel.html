@@ -261,7 +261,9 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
 .play-row{display:flex;align-items:center;gap:6px}
 .play-slider{flex:1;accent-color:var(--acc);cursor:pointer;height:3px}
 .play-time{font-size:9px;color:var(--mut);font-family:var(--m);white-space:nowrap}
+.play-status{font-size:9px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:auto}
 .btn-play{padding:4px 10px;background:var(--acc);color:#fff;border:none;border-radius:5px;font-size:10px;font-family:var(--f);font-weight:700;cursor:pointer}
+.btn-play.stop{background:var(--err-lt);color:var(--err);border:1px solid rgba(220,38,38,.25)}
 .btn-play:disabled{opacity:.5;cursor:not-allowed}
 
 /* ── HISTORY ─────────────────────────────────────────── */
@@ -395,7 +397,7 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
   <div class="logo"><div class="logo-i">🤖</div><div><div class="logo-t">LivePilot</div><div class="logo-sub">AI Agent &amp; Auto-Docs</div></div></div>
   <div class="hdr-r">
     <div class="rec-badge" id="recBadge"><div class="rec-dot"></div>REC</div>
-    <div class="mdl-pill" id="mdlPill">llama-3.3-70b</div>
+    <div class="mdl-pill" id="mdlPill">gpt-oss-20b</div>
     <div class="dot" id="dot"></div>
   </div>
 </div>
@@ -513,7 +515,7 @@ body{width:100%;height:100vh;background:var(--bg);color:var(--txt);font-family:v
     <div class="s-row"><div><div class="s-lbl">Show Plan First</div><div class="s-dsc">Review AI plan before execution</div></div><div class="tog on" id="togPlan" data-key="planning"></div></div>
     <div class="set-section">AI Model</div>
     <div class="s-row"><div><div class="s-lbl">Groq Model</div><div class="s-dsc">Model for planning &amp; healing</div></div>
-      <select class="mdl-sel" id="mdlSel"><option value="llama-3.3-70b-versatile">Llama 3.3 70B</option><option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option></select></div>
+      <select class="mdl-sel" id="mdlSel"><option value="openai/gpt-oss-20b">GPT OSS 20B</option><option value="llama-3.1-8b-instant">Llama 3.1 8B (Fast)</option></select></div>
     <div class="set-section">Smart Variables</div>
     <div class="vars-grid">
       <div class="var-field"><div class="var-label">{{email}}</div><input class="var-inp" data-var="email" placeholder="your@email.com"></div>

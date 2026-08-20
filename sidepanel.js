@@ -1,8 +1,9 @@
 // LivePilot sidepanel.js — persistent side panel, recording relay, CSV export
 'use strict';
 
+var DEFAULT_MODEL = 'openai/gpt-oss-20b';
 var G = {
-  apiKey: '', model: 'llama-3.3-70b-versatile',
+  apiKey: '', model: DEFAULT_MODEL,
   running: false, aborted: false,
   plan: null, shots: [], workflows: [], history: [], recordings: [], log: [],
   extractedData: [],   // [{text, href}] accumulated across all extract steps
@@ -10,6 +11,7 @@ var G = {
   vars: {}, done: 0, total: 0,
   planResolve: null, confResolve: null, varResolve: null, delResolve: null,
   timerInterval: null, startTime: null, currentTabId: null,
+  playback: { active: false, token: 0, tabId: null },
   isRecording: false, currentRecording: null, savingRecording: false,
   lastTask: '', pendingGuide: null, skipSavePrompt: false, confluence: null,
 };
@@ -32,7 +34,11 @@ function saveLocal(items){
 document.addEventListener('DOMContentLoaded', function() {
   chrome.storage.local.get(['apiKey','model','workflows','settings','history','vars','recordings','onboarded','confluence'], function(d) {
     if (d.apiKey)     { G.apiKey=d.apiKey; bannerOk(true); }
-    if (d.model)      { G.model=d.model; q('mdlSel').value=G.model; updateMdlPill(); }
+    if (d.model)      {
+      G.model=d.model==='llama-3.3-70b-versatile' ? DEFAULT_MODEL : d.model;
+      q('mdlSel').value=G.model; updateMdlPill();
+      if (G.model!==d.model) saveLocal({model:G.model});
+    }
     if (d.workflows)  { G.workflows=Array.isArray(d.workflows)?d.workflows:[]; }
     if (d.settings)   { G.settings=Object.assign({},G.settings,d.settings); }
     if (d.history)    { G.history=Array.isArray(d.history)?d.history:[]; }
@@ -429,8 +435,12 @@ function renderEditSteps(){
     } else {
       thumb.textContent='📷'; thumb.title='Capture the current tab for this step';
       thumb.addEventListener('click',function(){
-        chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT'},function(r){
-          if(r&&r.url){ EDIT.screenshots[i]=r.url; renderEditSteps(); }
+        getActiveTab(function(tab){
+          if(!tab){addLog('No active tab to capture.','err');return;}
+          chrome.runtime.sendMessage({type:'CAPTURE_SCREENSHOT',tabId:tab.id},function(r){
+            if(r&&r.url){ EDIT.screenshots[i]=r.url; renderEditSteps(); }
+            else if(r&&r.error) addLog('Screenshot: '+r.error,'err');
+          });
         });
       });
     }
@@ -489,48 +499,77 @@ function openPlayUI(rec,item){
   var pr=document.createElement('div');pr.className='play-row';
   var slider=document.createElement('input');slider.type='range';slider.className='play-slider';slider.min='0';slider.max=rec.actions.length-1;slider.value='0';
   var timeEl=document.createElement('span');timeEl.className='play-time';timeEl.textContent='0/'+rec.actions.length;
+  var statusEl=document.createElement('span');statusEl.className='play-status';statusEl.textContent='Ready';
   slider.addEventListener('input',function(){timeEl.textContent=parseInt(slider.value)+'/'+rec.actions.length;});
   var pb=document.createElement('button');pb.className='btn-play';pb.textContent='\u25B6 Play';
+  var stop=document.createElement('button');stop.className='btn-play stop';stop.textContent='\u25A0 Stop';stop.hidden=true;
   pb.addEventListener('click',function(){
     var iters=Math.max(1,parseInt(ii.value)||1),delay=Math.max(0,parseInt(di.value)||400),from=parseInt(slider.value)||0;
-    pb.disabled=true;pb.textContent='\u23F3\u2026';
-    playRecording(rec,iters,delay,from,slider,timeEl).then(function(){pb.disabled=false;pb.textContent='\u25B6 Play';});
+    if(G.playback.active) return;
+    getActiveTab(function(tab){
+      if(!tab){statusEl.textContent='No active tab';addLog('No active tab for playback.','err');return;}
+      G.currentTabId=tab.id;
+      G.playback={active:true,token:G.playback.token+1,tabId:tab.id};
+      var playback=G.playback;
+      pb.disabled=true;stop.hidden=false;statusEl.textContent='Playing on '+(tab.title||tab.url||'active tab');
+      playRecording(rec,iters,delay,from,slider,timeEl,tab.id,playback).then(function(){
+        statusEl.textContent='Complete';
+      }).catch(function(e){
+        if(e.message==='Playback stopped') statusEl.textContent='Stopped';
+        else {statusEl.textContent='Failed';addLog('\u2717 Playback failed: '+e.message,'err');}
+      }).then(function(){
+        G.playback.active=false;pb.disabled=false;stop.hidden=true;pb.textContent='\u25B6 Play';
+      });
+    });
   });
-  pr.appendChild(slider);pr.appendChild(timeEl);pr.appendChild(pb);
+  stop.addEventListener('click',function(){
+    if(!G.playback.active) return;
+    G.playback.active=false;stop.hidden=true;statusEl.textContent='Stopping\u2026';addLog('Playback stopped.','inf');
+  });
+  pr.appendChild(slider);pr.appendChild(timeEl);pr.appendChild(statusEl);pr.appendChild(pb);pr.appendChild(stop);
   ctrl.appendChild(ir);ctrl.appendChild(pr);item.appendChild(ctrl);
 }
 
-function playRecording(rec,iterations,delay,from,slider,timeEl){
+function playRecording(rec,iterations,delay,from,slider,timeEl,tabId,playback){
   addLog('\u25B6 Playing "'+rec.name+'" \u00D7'+iterations,'done');
   q('feedBox').classList.add('on');
   var chain=Promise.resolve();
   for(var it=0;it<iterations;it++){
     (function(i){
       chain=chain.then(function(){
+        assertPlaybackActive(playback);
         if(iterations>1) addLog('Iteration '+(i+1)+'/'+iterations,'inf');
-        return playSteps(rec,from,delay,slider,timeEl);
+        return playSteps(rec,from,delay,slider,timeEl,tabId,playback);
       });
-      if(i<iterations-1&&delay>0) chain=chain.then(function(){return sleep(delay);});
+      if(i<iterations-1&&delay>0) chain=chain.then(function(){assertPlaybackActive(playback);return sleep(delay);});
     })(it);
   }
   return chain.then(function(){addLog('\u2713 Playback complete.','done');});
 }
 
-function playSteps(rec,from,delay,slider,timeEl){
+function assertPlaybackActive(playback){
+  if(!playback||!playback.active||G.playback.token!==playback.token) throw new Error('Playback stopped');
+}
+
+function playSteps(rec,from,delay,slider,timeEl,tabId,playback){
   var chain=Promise.resolve();
   rec.actions.forEach(function(action,ai){
     if(ai<from) return;
     chain=chain.then(function(){
+      assertPlaybackActive(playback);
       if(slider){slider.value=ai;if(timeEl)timeEl.textContent=(ai+1)+'/'+rec.actions.length;}
       addLog('\u2192 ['+(ai+1)+'] '+action.action+': '+(action.target||'').slice(0,40),'run');
-      return doAction(G.currentTabId||0,action).then(function(r){
+      return doAction(tabId,action).then(function(r){
+        assertPlaybackActive(playback);
         if(r&&r.error){
           addLog('\u2717 '+r.error,'err');
-          return healStep(G.currentTabId,action,r.error,'playback').then(function(h){
-            if(h&&!h.error) addLog('\u2713 Healed','heal'); else addLog('\u26A0 Heal failed','inf');
+          return healStep(tabId,action,r.error,'playback').then(function(h){
+            assertPlaybackActive(playback);
+            if(h&&!h.error) addLog('\u2713 Healed','heal');
+            else { addLog('\u26A0 Heal failed','err'); throw new Error('Could not recover step '+(ai+1)); }
           });
         } else { addLog('\u2713 '+(action.description||action.action),'done'); }
-        return delay>0?sleep(delay):Promise.resolve();
+        if(delay>0) return sleep(delay).then(function(){assertPlaybackActive(playback);});
       });
     });
   });

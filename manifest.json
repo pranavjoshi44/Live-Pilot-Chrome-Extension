@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LivePilot \u2014 AI Browser Automation & Documentation",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "AI browser automation agent \u2014 automate tasks, record sessions, extract data, and auto-generate step-by-step docs with screenshots.",
   "icons": {
     "16": "icons/icon16.png",
